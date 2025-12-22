@@ -24,13 +24,31 @@ export interface VolumeProfileLevel {
   totalVolume: number;
 }
 
+export interface AbsorptionZone {
+  price: number;
+  absorptionType: 'buying' | 'selling';
+  totalAbsorbed: number;
+  eventCount: number;
+  firstSeen: number;
+  lastSeen: number;
+  strength: 'weak' | 'medium' | 'strong' | 'defended';
+  atPoc: boolean;
+  atVah: boolean;
+  atVal: boolean;
+  againstTrend: boolean;
+}
+
 export interface AbsorptionEvent {
   timestamp: number;
   price: number;
-  absorptionType: 'buying' | 'selling'; // Which side is being absorbed
+  absorptionType: 'buying' | 'selling';
   delta: number;
   priceChange: number;
-  strength: number; // 0.0-1.0
+  strength: 'weak' | 'medium' | 'strong' | 'defended';
+  eventCount: number;
+  totalAbsorbed: number;
+  atKeyLevel: boolean;
+  againstTrend: boolean;
   x: number;
 }
 
@@ -39,6 +57,7 @@ export type WsMessage =
   | { type: 'CVDPoint'; timestamp: number; value: number; x: number }
   | { type: 'VolumeProfile'; levels: VolumeProfileLevel[] }
   | { type: 'Absorption' } & AbsorptionEvent
+  | { type: 'AbsorptionZones'; zones: AbsorptionZone[] }
   | { type: 'Connected'; symbols: string[] }
   | { type: 'Error'; message: string };
 

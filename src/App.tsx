@@ -32,8 +32,24 @@ interface AbsorptionAlert {
   price: number;
   absorptionType: 'buying' | 'selling';
   delta: number;
-  strength: number;
+  strength: 'weak' | 'medium' | 'strong' | 'defended';
+  eventCount: number;
+  totalAbsorbed: number;
+  atKeyLevel: boolean;
+  againstTrend: boolean;
   x: number;
+}
+
+interface AbsorptionZone {
+  price: number;
+  absorptionType: 'buying' | 'selling';
+  totalAbsorbed: number;
+  eventCount: number;
+  strength: 'weak' | 'medium' | 'strong' | 'defended';
+  atPoc: boolean;
+  atVah: boolean;
+  atVal: boolean;
+  againstTrend: boolean;
 }
 
 interface VolumeProfileLevel {
@@ -120,7 +136,8 @@ function App() {
   const [showShortcutsHelp, setShowShortcutsHelp] = useState(false);
   const [isSoundEnabled, setIsSoundEnabled] = useState(true);
   const [cvdStartTime, setCvdStartTime] = useState<number>(Date.now());
-  const [_absorptionAlerts, setAbsorptionAlerts] = useState<AbsorptionAlert[]>([]); // For future canvas rendering
+  const [_absorptionAlerts, setAbsorptionAlerts] = useState<AbsorptionAlert[]>([]); // eslint-disable-line @typescript-eslint/no-unused-vars
+  const [absorptionZones, setAbsorptionZones] = useState<AbsorptionZone[]>([]); // Passed to BubbleRenderer for canvas rendering
   const [showAbsorptionBadge, setShowAbsorptionBadge] = useState<AbsorptionAlert | null>(null);
 
   const wsRef = useRef<RustWebSocket | null>(null);
@@ -244,22 +261,42 @@ function App() {
             absorptionType: message.absorptionType,
             delta: message.delta,
             strength: message.strength,
+            eventCount: message.eventCount,
+            totalAbsorbed: message.totalAbsorbed,
+            atKeyLevel: message.atKeyLevel,
+            againstTrend: message.againstTrend,
             x: message.x,
           };
 
           console.log(
-            `🛡️ ABSORPTION: ${absorption.absorptionType} absorbed at ${absorption.price.toFixed(2)} (delta=${absorption.delta}, strength=${(absorption.strength * 100).toFixed(0)}%)`
+            `🛡️ ABSORPTION [${absorption.strength.toUpperCase()}]: ${absorption.absorptionType} absorbed at ${absorption.price.toFixed(2)} | events=${absorption.eventCount} total=${absorption.totalAbsorbed} ${absorption.atKeyLevel ? '@ KEY LEVEL' : ''} ${absorption.againstTrend ? '⚠️ AGAINST TREND' : ''}`
           );
 
           setAbsorptionAlerts((prev) => [...prev, absorption]);
 
-          // Show badge notification
-          setShowAbsorptionBadge(absorption);
-          setTimeout(() => setShowAbsorptionBadge(null), 3000);
+          // Only show badge for medium+ strength
+          if (absorption.strength !== 'weak') {
+            setShowAbsorptionBadge(absorption);
+            setTimeout(() => setShowAbsorptionBadge(null), 4000);
 
-          if (isSoundEnabled) {
-            playAbsorptionSound(absorption.absorptionType);
+            if (isSoundEnabled) {
+              playAbsorptionSound(absorption.absorptionType);
+            }
           }
+          break;
+
+        case 'AbsorptionZones':
+          setAbsorptionZones(message.zones.map(z => ({
+            price: z.price,
+            absorptionType: z.absorptionType,
+            totalAbsorbed: z.totalAbsorbed,
+            eventCount: z.eventCount,
+            strength: z.strength,
+            atPoc: z.atPoc,
+            atVah: z.atVah,
+            atVal: z.atVal,
+            againstTrend: z.againstTrend,
+          })));
           break;
 
         case 'Connected':
@@ -649,16 +686,47 @@ function App() {
 
         {/* Absorption Badge */}
         {showAbsorptionBadge && (
-          <div className={`absorption-badge ${showAbsorptionBadge.absorptionType}`}>
-            <div className="badge-icon">🛡️</div>
-            <div className="badge-text">
-              ABSORPTION: {showAbsorptionBadge.absorptionType.toUpperCase()}
+          <div className={`absorption-badge ${showAbsorptionBadge.absorptionType} ${showAbsorptionBadge.strength}`}>
+            <div className={`strength-indicator ${showAbsorptionBadge.strength}`}>
+              {showAbsorptionBadge.strength.toUpperCase()}
             </div>
-            <div className="badge-subtitle">
+            <div className="badge-icon">
+              {showAbsorptionBadge.strength === 'defended' ? '🔥' : '🛡️'}
+            </div>
+            <div className="badge-text">
+              {showAbsorptionBadge.strength === 'defended' ? 'DEFENDED LEVEL' : 'ABSORPTION'}
+            </div>
+            <div className="badge-type">
               {showAbsorptionBadge.absorptionType === 'buying'
                 ? 'Sellers absorbing buyers'
-                : 'Buyers absorbing sellers'}{' '}
-              ({(showAbsorptionBadge.strength * 100).toFixed(0)}%)
+                : 'Buyers absorbing sellers'}
+            </div>
+            <div className="badge-stats">
+              <span className="stat">
+                <span className="stat-label">Events</span>
+                <span className="stat-value">{showAbsorptionBadge.eventCount}x</span>
+              </span>
+              <span className="stat">
+                <span className="stat-label">Volume</span>
+                <span className="stat-value">{showAbsorptionBadge.totalAbsorbed}</span>
+              </span>
+              <span className="stat">
+                <span className="stat-label">Price</span>
+                <span className="stat-value">{showAbsorptionBadge.price.toFixed(2)}</span>
+              </span>
+            </div>
+            {(showAbsorptionBadge.atKeyLevel || showAbsorptionBadge.againstTrend) && (
+              <div className="badge-context">
+                {showAbsorptionBadge.atKeyLevel && <span className="context-tag key-level">@ KEY LEVEL</span>}
+                {showAbsorptionBadge.againstTrend && <span className="context-tag against-trend">⚠️ AGAINST TREND</span>}
+              </div>
+            )}
+            <div className="badge-subtitle">
+              {showAbsorptionBadge.strength === 'defended'
+                ? 'High probability reversal zone'
+                : showAbsorptionBadge.strength === 'strong'
+                ? 'Strong institutional defense'
+                : 'Building absorption zone'}
             </div>
           </div>
         )}
@@ -673,6 +741,7 @@ function App() {
           zeroCrosses={zeroCrosses}
           onClick={handleCanvasClick}
           volumeProfile={volumeProfile}
+          absorptionZones={absorptionZones}
         />
 
         {/* Bubble Info Tooltip */}

@@ -31,6 +31,18 @@ interface VolumeProfileLevel {
   totalVolume: number;
 }
 
+interface AbsorptionZone {
+  price: number;
+  absorptionType: 'buying' | 'selling';
+  totalAbsorbed: number;
+  eventCount: number;
+  strength: 'weak' | 'medium' | 'strong' | 'defended';
+  atPoc: boolean;
+  atVah: boolean;
+  atVal: boolean;
+  againstTrend: boolean;
+}
+
 interface BubbleRendererProps {
   bubbles: Bubble[];
   priceRange: { min: number; max: number } | null;
@@ -41,6 +53,7 @@ interface BubbleRendererProps {
   zeroCrosses: ZeroCross[];
   onClick?: (e: React.MouseEvent<HTMLCanvasElement>) => void;
   volumeProfile: Map<number, VolumeProfileLevel>;
+  absorptionZones?: AbsorptionZone[];
 }
 
 // Colors matching trading aesthetic
@@ -84,7 +97,8 @@ export function BubbleRenderer({
   currentCVD,
   zeroCrosses,
   onClick,
-  volumeProfile
+  volumeProfile,
+  absorptionZones = []
 }: BubbleRendererProps) {
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -273,7 +287,10 @@ export function BubbleRenderer({
     // Draw volume profile on LEFT edge (AFTER bubbles so it's on top)
     drawVolumeProfileEnhanced(ctx, volumeProfile, rect.width, mainChartHeight, priceMin, priceMax);
 
-  }, [bubbles, priceRange, canvasRef, cvdHistory, cvdRange, currentCVD, zeroCrosses, volumeProfile]);
+    // Draw absorption zones on the chart (after volume profile)
+    drawAbsorptionZones(ctx, absorptionZones, rect.width, mainChartHeight, priceMin, priceMax);
+
+  }, [bubbles, priceRange, canvasRef, cvdHistory, cvdRange, currentCVD, zeroCrosses, volumeProfile, absorptionZones]);
 
   return (
     <canvas
@@ -501,9 +518,9 @@ function drawVolumeProfileEnhanced(
     }
   }
 
-  // Calculate LVNs (Low Volume Nodes) - levels with < 30% of average volume
+  // Calculate LVNs (Low Volume Nodes) - levels with < 40% of average volume
   const avgVolume = levels.reduce((sum, l) => sum + l.totalVolume, 0) / levels.length;
-  const lvnThreshold = avgVolume * 0.3;
+  const lvnThreshold = avgVolume * 0.4; // Increased from 0.3 to catch more LVNs
   const lvnCandidates = levels.filter(l => l.totalVolume < lvnThreshold && l.totalVolume > 0);
 
   // Group consecutive LVNs into zones (merge LVNs within 3 price points)
@@ -534,6 +551,11 @@ function drawVolumeProfileEnhanced(
   }
 
   const lvns = lvnZones;
+
+  // Debug: log when LVNs are found
+  if (lvns.length > 0) {
+    console.log(`Found ${lvns.length} LVN zones:`, lvns.map(l => ({ price: l.price.toFixed(2), vol: l.totalVolume })));
+  }
 
   // Draw semi-transparent background
   ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
@@ -588,23 +610,40 @@ function drawVolumeProfileEnhanced(
       ctx.fillText('POC', profileX + profileWidth + 5, y + 3);
     }
 
-    // Mark LVNs (Low Volume Nodes)
-    if (lvns.includes(level)) {
-      ctx.strokeStyle = 'rgba(255, 140, 0, 0.5)'; // Orange dashed line
-      ctx.lineWidth = 1;
-      ctx.setLineDash([4, 4]);
-      ctx.beginPath();
-      ctx.moveTo(profileX + profileWidth, y); // Start after volume profile
-      ctx.lineTo(width - 60, y); // Extend to price labels
-      ctx.stroke();
-      ctx.setLineDash([]);
+  });
 
-      // LVN label on volume profile
-      ctx.fillStyle = 'rgba(255, 140, 0, 1)';
-      ctx.font = 'bold 8px "JetBrains Mono", monospace';
-      ctx.textAlign = 'left';
-      ctx.fillText('LVN', profileX + profileWidth + 5, y + 3);
-    }
+  // Draw LVN zones separately (they have averaged prices, not exact level matches)
+  lvns.forEach((lvnZone) => {
+    const lvnY = height - ((lvnZone.price - priceMin) / priceSpan) * height;
+
+    // Skip if outside visible range
+    if (lvnY < 0 || lvnY > height) return;
+
+    // Calculate zone "emptiness" - how low is the volume compared to average
+    const emptiness = 1 - (lvnZone.totalVolume / (avgVolume * 0.3)); // 0 = at threshold, 1 = completely empty
+    const intensity = 0.3 + emptiness * 0.5; // More intense orange for emptier zones
+
+    // LVN zone line
+    ctx.strokeStyle = `rgba(255, 140, 0, ${intensity})`;
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([6, 4]);
+    ctx.beginPath();
+    ctx.moveTo(profileX + profileWidth, lvnY);
+    ctx.lineTo(width - 60, lvnY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // LVN label with volume info
+    ctx.fillStyle = `rgba(255, 140, 0, ${0.7 + emptiness * 0.3})`;
+    ctx.font = 'bold 8px "JetBrains Mono", monospace';
+    ctx.textAlign = 'left';
+    ctx.fillText(`LVN ${lvnZone.totalVolume}`, profileX + profileWidth + 5, lvnY + 3);
+
+    // Price label on right side for LVNs
+    ctx.fillStyle = `rgba(255, 140, 0, 0.9)`;
+    ctx.font = '9px "JetBrains Mono", monospace';
+    ctx.textAlign = 'right';
+    ctx.fillText(lvnZone.price.toFixed(2), width - 5, lvnY + 3);
   });
 
   // Draw VAH (Value Area High) line
@@ -662,6 +701,69 @@ function drawVolumeProfileEnhanced(
 
   ctx.fillStyle = 'rgba(255, 140, 0, 0.8)';
   ctx.fillText('LVN = Low Vol', profileX + 5, legendY + 12);
+}
+
+// Draw absorption zones on the chart - ONLY DEFENDED zones
+function drawAbsorptionZones(
+  ctx: CanvasRenderingContext2D,
+  zones: AbsorptionZone[],
+  width: number,
+  height: number,
+  priceMin: number,
+  priceMax: number
+) {
+  if (zones.length === 0) return;
+
+  const priceSpan = priceMax - priceMin;
+  const profileWidth = 85; // Match volume profile width
+  const startX = profileWidth; // Same as POC/VAH/VAL lines
+
+  // Only show DEFENDED zones (5+ events) - these are the real institutional levels
+  const defendedZones = zones.filter(z => z.strength === 'defended');
+
+  defendedZones.forEach((zone) => {
+    const y = height - ((zone.price - priceMin) / priceSpan) * height;
+
+    // Skip if outside visible range
+    if (y < 0 || y > height) return;
+
+    // Distinct color: Magenta/Hot Pink for defended zones (not cyan like POC, not orange like LVN)
+    const isBuying = zone.absorptionType === 'buying';
+    // Magenta for buying absorption (sellers defending), Yellow-gold for selling absorption (buyers defending)
+    const color = isBuying ? 'rgba(255, 0, 128, 0.8)' : 'rgba(255, 215, 0, 0.8)';
+    const labelBg = isBuying ? 'rgba(255, 0, 128, 0.15)' : 'rgba(255, 215, 0, 0.15)';
+
+    // Draw solid defended line - same X range as POC/VAH/VAL
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    ctx.moveTo(startX, y);
+    ctx.lineTo(width - 60, y); // Same end point as other lines
+    ctx.stroke();
+
+    // Draw label with background for clarity
+    const label = `DEFENDED ${zone.eventCount}x`;
+    ctx.font = 'bold 9px "JetBrains Mono", monospace';
+    const labelWidth = ctx.measureText(label).width + 8;
+    const labelX = startX + 8; // Offset from line start
+
+    // Label background
+    ctx.fillStyle = labelBg;
+    ctx.fillRect(labelX - 2, y - 7, labelWidth, 14);
+
+    // Label text
+    ctx.fillStyle = color;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, labelX + 2, y);
+
+    // Type indicator (who is defending)
+    const typeLabel = isBuying ? '(sellers)' : '(buyers)';
+    ctx.font = '8px "JetBrains Mono", monospace';
+    ctx.fillStyle = color.replace('0.8', '0.6');
+    ctx.fillText(typeLabel, labelX + labelWidth + 4, y);
+  });
 }
 
 // Optional: Volume Profile on right side (legacy, kept for reference)

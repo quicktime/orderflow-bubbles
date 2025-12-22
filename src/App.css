@@ -1375,28 +1375,120 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
-  padding: 20px 36px;
+  gap: 6px;
+  padding: 20px 32px;
   background: var(--bg-elevated);
   border: 3px solid;
   border-radius: var(--radius-lg);
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.8);
   animation: absorptionEntrance 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
   pointer-events: none;
+  min-width: 280px;
 }
 
-.absorption-badge.buying {
+/* MEDIUM strength - base styling */
+.absorption-badge.buying.medium {
   border-color: #ff9800;
   box-shadow:
     0 20px 60px rgba(0, 0, 0, 0.8),
-    0 0 40px rgba(255, 152, 0, 0.3);
+    0 0 30px rgba(255, 152, 0, 0.2);
 }
 
-.absorption-badge.selling {
+.absorption-badge.selling.medium {
   border-color: #9c27b0;
   box-shadow:
     0 20px 60px rgba(0, 0, 0, 0.8),
-    0 0 40px rgba(156, 39, 176, 0.3);
+    0 0 30px rgba(156, 39, 176, 0.2);
+}
+
+/* STRONG strength - more intense */
+.absorption-badge.buying.strong {
+  border-color: #ff9800;
+  border-width: 4px;
+  box-shadow:
+    0 20px 60px rgba(0, 0, 0, 0.8),
+    0 0 50px rgba(255, 152, 0, 0.4);
+}
+
+.absorption-badge.selling.strong {
+  border-color: #9c27b0;
+  border-width: 4px;
+  box-shadow:
+    0 20px 60px rgba(0, 0, 0, 0.8),
+    0 0 50px rgba(156, 39, 176, 0.4);
+}
+
+/* DEFENDED level - maximum emphasis with glow animation */
+.absorption-badge.defended {
+  border-width: 5px;
+  animation: absorptionEntrance 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), defendedGlow 0.8s ease-in-out infinite alternate;
+}
+
+.absorption-badge.buying.defended {
+  border-color: #ff5722;
+  box-shadow:
+    0 20px 60px rgba(0, 0, 0, 0.8),
+    0 0 80px rgba(255, 87, 34, 0.6),
+    0 0 120px rgba(255, 152, 0, 0.3);
+}
+
+.absorption-badge.selling.defended {
+  border-color: #e040fb;
+  box-shadow:
+    0 20px 60px rgba(0, 0, 0, 0.8),
+    0 0 80px rgba(224, 64, 251, 0.6),
+    0 0 120px rgba(156, 39, 176, 0.3);
+}
+
+@keyframes defendedGlow {
+  0% { filter: brightness(1); }
+  100% { filter: brightness(1.2); }
+}
+
+/* Strength indicator pill */
+.absorption-badge .strength-indicator {
+  position: absolute;
+  top: -10px;
+  right: -10px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  padding: 4px 10px;
+  border-radius: 20px;
+  text-transform: uppercase;
+}
+
+.absorption-badge .strength-indicator.medium {
+  background: linear-gradient(135deg, #ffc107 0%, #ff9800 100%);
+  color: #000;
+  box-shadow: 0 2px 8px rgba(255, 152, 0, 0.4);
+}
+
+.absorption-badge .strength-indicator.strong {
+  background: linear-gradient(135deg, #ff9800 0%, #ff5722 100%);
+  color: #fff;
+  box-shadow: 0 2px 12px rgba(255, 87, 34, 0.5);
+  animation: strongPulse 0.5s ease-in-out infinite alternate;
+}
+
+.absorption-badge .strength-indicator.defended {
+  background: linear-gradient(135deg, #ff5722 0%, #f44336 100%);
+  color: #fff;
+  box-shadow: 0 2px 16px rgba(244, 67, 54, 0.6);
+  animation: defendedPulse 0.3s ease-in-out infinite alternate;
+  font-size: 11px;
+  padding: 5px 12px;
+}
+
+@keyframes strongPulse {
+  0% { transform: scale(1); }
+  100% { transform: scale(1.05); }
+}
+
+@keyframes defendedPulse {
+  0% { transform: scale(1); box-shadow: 0 2px 16px rgba(244, 67, 54, 0.6); }
+  100% { transform: scale(1.1); box-shadow: 0 2px 24px rgba(244, 67, 54, 0.8); }
 }
 
 @keyframes absorptionEntrance {
@@ -1416,9 +1508,19 @@ body {
   animation: shieldPulse 0.4s ease-in-out infinite alternate;
 }
 
+.absorption-badge.defended .badge-icon {
+  font-size: 48px;
+  animation: firePulse 0.3s ease-in-out infinite alternate;
+}
+
 @keyframes shieldPulse {
   0% { transform: scale(1); }
-  100% { transform: scale(1.15); }
+  100% { transform: scale(1.1); }
+}
+
+@keyframes firePulse {
+  0% { transform: scale(1) rotate(-3deg); }
+  100% { transform: scale(1.15) rotate(3deg); }
 }
 
 .absorption-badge .badge-text {
@@ -1426,6 +1528,10 @@ body {
   font-size: 20px;
   font-weight: 700;
   letter-spacing: 2px;
+}
+
+.absorption-badge.defended .badge-text {
+  font-size: 22px;
 }
 
 .absorption-badge.buying .badge-text {
@@ -1436,12 +1542,93 @@ body {
   color: #9c27b0;
 }
 
-.absorption-badge .badge-subtitle {
+.absorption-badge .badge-type {
   font-family: var(--font-mono);
-  font-size: 12px;
-  font-weight: 500;
+  font-size: 11px;
+  font-weight: 600;
   letter-spacing: 1px;
   color: var(--text-secondary);
+  text-transform: uppercase;
+}
+
+.absorption-badge .badge-stats {
+  display: flex;
+  gap: 16px;
+  margin-top: 8px;
+  padding: 8px 12px;
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: var(--radius-sm);
+}
+
+.absorption-badge .badge-stats .stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.absorption-badge .badge-stats .stat-label {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+}
+
+.absorption-badge .badge-stats .stat-value {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.absorption-badge .badge-context {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.absorption-badge .context-tag {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+}
+
+.absorption-badge .context-tag.key-level {
+  background: rgba(68, 138, 255, 0.2);
+  color: #448aff;
+  border: 1px solid rgba(68, 138, 255, 0.4);
+}
+
+.absorption-badge .context-tag.against-trend {
+  background: rgba(255, 193, 7, 0.2);
+  color: #ffc107;
+  border: 1px solid rgba(255, 193, 7, 0.4);
+  animation: warningPulse 0.5s ease-in-out infinite alternate;
+}
+
+@keyframes warningPulse {
+  0% { opacity: 0.8; }
+  100% { opacity: 1; }
+}
+
+.absorption-badge .badge-subtitle {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+  margin-top: 4px;
+  text-align: center;
+}
+
+.absorption-badge.defended .badge-subtitle {
+  color: var(--accent-green);
+  font-weight: 600;
 }
 
 /* Bubble Info Tooltip */
