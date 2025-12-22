@@ -518,45 +518,6 @@ function drawVolumeProfileEnhanced(
     }
   }
 
-  // Calculate LVNs (Low Volume Nodes) - levels with < 40% of average volume
-  const avgVolume = levels.reduce((sum, l) => sum + l.totalVolume, 0) / levels.length;
-  const lvnThreshold = avgVolume * 0.4; // Increased from 0.3 to catch more LVNs
-  const lvnCandidates = levels.filter(l => l.totalVolume < lvnThreshold && l.totalVolume > 0);
-
-  // Group consecutive LVNs into zones (merge LVNs within 3 price points)
-  const lvnZones: VolumeProfileLevel[] = [];
-  let currentZone: VolumeProfileLevel[] = [];
-
-  lvnCandidates.forEach((lvn) => {
-    if (currentZone.length === 0) {
-      currentZone.push(lvn);
-    } else {
-      const lastInZone = currentZone[currentZone.length - 1];
-      if (Math.abs(lvn.price - lastInZone.price) <= 3.0) {
-        // Within 3 points - add to current zone
-        currentZone.push(lvn);
-      } else {
-        // New zone - save current and start new
-        const midPrice = currentZone.reduce((sum, l) => sum + l.price, 0) / currentZone.length;
-        lvnZones.push({ ...currentZone[0], price: midPrice });
-        currentZone = [lvn];
-      }
-    }
-  });
-
-  // Add final zone
-  if (currentZone.length > 0) {
-    const midPrice = currentZone.reduce((sum, l) => sum + l.price, 0) / currentZone.length;
-    lvnZones.push({ ...currentZone[0], price: midPrice });
-  }
-
-  const lvns = lvnZones;
-
-  // Debug: log when LVNs are found
-  if (lvns.length > 0) {
-    console.log(`Found ${lvns.length} LVN zones:`, lvns.map(l => ({ price: l.price.toFixed(2), vol: l.totalVolume })));
-  }
-
   // Draw semi-transparent background
   ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
   ctx.fillRect(profileX, 0, profileWidth, height);
@@ -612,40 +573,6 @@ function drawVolumeProfileEnhanced(
 
   });
 
-  // Draw LVN zones separately (they have averaged prices, not exact level matches)
-  lvns.forEach((lvnZone) => {
-    const lvnY = height - ((lvnZone.price - priceMin) / priceSpan) * height;
-
-    // Skip if outside visible range
-    if (lvnY < 0 || lvnY > height) return;
-
-    // Calculate zone "emptiness" - how low is the volume compared to average
-    const emptiness = 1 - (lvnZone.totalVolume / (avgVolume * 0.3)); // 0 = at threshold, 1 = completely empty
-    const intensity = 0.3 + emptiness * 0.5; // More intense orange for emptier zones
-
-    // LVN zone line
-    ctx.strokeStyle = `rgba(255, 140, 0, ${intensity})`;
-    ctx.lineWidth = 1.5;
-    ctx.setLineDash([6, 4]);
-    ctx.beginPath();
-    ctx.moveTo(profileX + profileWidth, lvnY);
-    ctx.lineTo(width - 60, lvnY);
-    ctx.stroke();
-    ctx.setLineDash([]);
-
-    // LVN label with volume info
-    ctx.fillStyle = `rgba(255, 140, 0, ${0.7 + emptiness * 0.3})`;
-    ctx.font = 'bold 8px "JetBrains Mono", monospace';
-    ctx.textAlign = 'left';
-    ctx.fillText(`LVN ${lvnZone.totalVolume}`, profileX + profileWidth + 5, lvnY + 3);
-
-    // Price label on right side for LVNs
-    ctx.fillStyle = `rgba(255, 140, 0, 0.9)`;
-    ctx.font = '9px "JetBrains Mono", monospace';
-    ctx.textAlign = 'right';
-    ctx.fillText(lvnZone.price.toFixed(2), width - 5, lvnY + 3);
-  });
-
   // Draw VAH (Value Area High) line
   const vahY = height - ((vah.price - priceMin) / priceSpan) * height;
   ctx.strokeStyle = 'rgba(138, 43, 226, 0.7)'; // Purple for VAH
@@ -698,9 +625,6 @@ function drawVolumeProfileEnhanced(
 
   ctx.fillStyle = 'rgba(255, 215, 0, 1)';
   ctx.fillText('POC = High Vol', profileX + 5, legendY);
-
-  ctx.fillStyle = 'rgba(255, 140, 0, 0.8)';
-  ctx.fillText('LVN = Low Vol', profileX + 5, legendY + 12);
 }
 
 // Draw absorption zones on the chart - ONLY DEFENDED zones
@@ -715,7 +639,7 @@ function drawAbsorptionZones(
   if (zones.length === 0) return;
 
   const priceSpan = priceMax - priceMin;
-  const profileWidth = 85; // Match volume profile width
+  const profileWidth = 120; // Must match drawVolumeProfileEnhanced
   const startX = profileWidth; // Same as POC/VAH/VAL lines
 
   // Only show DEFENDED zones (5+ events) - these are the real institutional levels

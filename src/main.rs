@@ -182,6 +182,7 @@ struct AbsorptionZoneInternal {
     event_count: u32,
     first_seen: u64,
     last_seen: u64,
+    peak_strength: u8,  // 0=weak, 1=medium, 2=strong, 3=defended - never goes down
 }
 
 // Processing state for aggregation
@@ -312,8 +313,8 @@ impl ProcessingState {
         (at_poc, at_vah, at_val)
     }
 
-    // Calculate strength based on event count and context
-    fn calculate_strength(&self, event_count: u32, at_key_level: bool, against_trend: bool) -> &'static str {
+    // Calculate strength based on event count and context - returns (string, numeric)
+    fn calculate_strength_with_num(&self, event_count: u32, at_key_level: bool, against_trend: bool) -> (&'static str, u8) {
         let base_strength = match event_count {
             1 => 0,
             2 => 1,
@@ -322,8 +323,19 @@ impl ProcessingState {
         };
 
         let bonus = (if at_key_level { 1 } else { 0 }) + (if against_trend { 1 } else { 0 });
+        let total = base_strength + bonus;
 
-        match base_strength + bonus {
+        match total {
+            0 => ("weak", 0),
+            1 => ("medium", 1),
+            2 => ("strong", 2),
+            _ => ("defended", 3),
+        }
+    }
+
+    // Convert numeric strength to string
+    fn strength_num_to_str(num: u8) -> &'static str {
+        match num {
             0 => "weak",
             1 => "medium",
             2 => "strong",
@@ -331,15 +343,15 @@ impl ProcessingState {
         }
     }
 
-    // Clean up old absorption zones with strength-based persistence
-    // - Weak/Medium zones (1-2 events): 5 minutes
-    // - Strong zones (3-4 events): 15 minutes
-    // - Defended zones (5+ events): 30 minutes
+    // Clean up old absorption zones with strength-based persistence (using peak_strength)
+    // - Weak/Medium (0-1): 5 minutes
+    // - Strong (2): 15 minutes
+    // - Defended (3): 30 minutes
     fn cleanup_old_zones(&mut self, now: u64) {
         self.absorption_zones.retain(|_, zone| {
-            let max_age_ms = match zone.event_count {
-                0..=2 => 5 * 60 * 1000,    // 5 minutes for weak/medium
-                3..=4 => 15 * 60 * 1000,   // 15 minutes for strong
+            let max_age_ms = match zone.peak_strength {
+                0..=1 => 5 * 60 * 1000,    // 5 minutes for weak/medium
+                2 => 15 * 60 * 1000,       // 15 minutes for strong
                 _ => 30 * 60 * 1000,       // 30 minutes for defended
             };
             let cutoff = now.saturating_sub(max_age_ms);
@@ -557,6 +569,7 @@ impl ProcessingState {
                             event_count: 0,
                             first_seen: now,
                             last_seen: now,
+                            peak_strength: 0,
                         });
 
                     zone.total_absorbed += abs_delta;
@@ -567,9 +580,17 @@ impl ProcessingState {
                     // Copy values before releasing borrow
                     let zone_event_count = zone.event_count;
                     let zone_total_absorbed = zone.total_absorbed;
+                    let zone_peak_strength = zone.peak_strength;
 
-                    // Calculate strength (now we don't hold mutable borrow)
-                    let strength = self.calculate_strength(zone_event_count, at_key_level, against_trend);
+                    // Calculate current strength (now we don't hold mutable borrow)
+                    let (strength, strength_num) = self.calculate_strength_with_num(zone_event_count, at_key_level, against_trend);
+
+                    // Update peak strength if current is higher (never goes down)
+                    if strength_num > zone_peak_strength {
+                        if let Some(z) = self.absorption_zones.get_mut(&price_key) {
+                            z.peak_strength = strength_num;
+                        }
+                    }
 
                     // Only emit events for medium+ strength OR first event at key level
                     let should_emit = strength != "weak" || (zone_event_count == 1 && at_key_level);
@@ -625,8 +646,9 @@ impl ProcessingState {
                 let cvd_trend = self.get_cvd_trend();
                 let against_trend = (z.absorption_type == "buying" && cvd_trend > 100)
                     || (z.absorption_type == "selling" && cvd_trend < -100);
-                let at_key = at_poc || at_vah || at_val;
-                let strength = self.calculate_strength(z.event_count, at_key, against_trend);
+
+                // Use peak_strength - once defended, always defended
+                let strength = Self::strength_num_to_str(z.peak_strength);
 
                 AbsorptionZone {
                     price: z.price,
