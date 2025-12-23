@@ -89,8 +89,11 @@ pub async fn run_historical_replay(
         symbols: symbols.clone(),
     });
 
-    // Create processing state
-    let processing_state = Arc::new(RwLock::new(ProcessingState::new()));
+    // Create processing state with Supabase persistence
+    let processing_state = Arc::new(RwLock::new(ProcessingState::new(
+        state.supabase.clone(),
+        state.session_id,
+    )));
 
     // Spawn aggregation task (but with speed multiplier)
     let processing_state_clone = processing_state.clone();

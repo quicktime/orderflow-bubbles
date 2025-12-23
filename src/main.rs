@@ -1,5 +1,6 @@
 mod processing;
 mod streams;
+mod supabase;
 mod types;
 
 use anyhow::Result;
@@ -23,6 +24,7 @@ use tower_http::{
 use tracing::{error, info};
 
 use streams::{run_databento_stream, run_demo_stream, run_historical_replay};
+use supabase::{SessionRecord, SupabaseClient};
 use types::{AppState, ClientMessage, WsMessage};
 
 #[derive(Parser, Debug)]
@@ -107,10 +109,42 @@ async fn main() -> Result<()> {
         .map(|s| s.trim().to_string())
         .collect();
 
+    // Initialize Supabase client (optional - works without it)
+    let (supabase, session_id) = match SupabaseClient::from_env() {
+        Some(client) => {
+            info!("📊 Supabase connected - signals will be persisted");
+            let session = SessionRecord {
+                id: None,
+                mode: mode.to_lowercase(),
+                symbols: symbols.clone(),
+                session_high: None,
+                session_low: None,
+                total_volume: None,
+            };
+            match client.insert_session(&session).await {
+                Ok(id) => {
+                    info!("📊 Session created: {}", id);
+                    (Some(client), Some(id))
+                }
+                Err(e) => {
+                    error!("Failed to create session in Supabase: {}", e);
+                    (Some(client), None)
+                }
+            }
+        }
+        None => {
+            info!("📊 Supabase not configured - signals will not be persisted");
+            info!("   Set SUPABASE_URL and SUPABASE_ANON_KEY to enable persistence");
+            (None, None)
+        }
+    };
+
     let state = Arc::new(AppState {
         tx: tx.clone(),
         active_symbols: RwLock::new(symbols.iter().cloned().collect()),
         min_size: RwLock::new(args.min_size),
+        session_id,
+        supabase,
     });
 
     // Spawn data streaming task (demo, replay, or live)

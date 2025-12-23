@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use tokio::sync::{broadcast, RwLock};
+use uuid::Uuid;
+
+use crate::supabase::SupabaseClient;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Trade {
@@ -214,4 +217,6 @@ pub struct AppState {
     pub tx: broadcast::Sender<WsMessage>,
     pub active_symbols: RwLock<HashSet<String>>,
     pub min_size: RwLock<u32>,
+    pub session_id: Option<Uuid>,
+    pub supabase: Option<SupabaseClient>,
 }

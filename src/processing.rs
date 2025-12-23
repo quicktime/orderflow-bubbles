@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 use tokio::sync::broadcast;
 use tracing::info;
+use uuid::Uuid;
 
+use crate::supabase::{SignalInsert, SupabaseClient};
 use crate::types::{
     AbsorptionEvent, AbsorptionZone, Bubble, CVDPoint, ConfluenceEvent, DeltaFlip,
     SessionStats, SignalRecord, SignalStats, StackedImbalance, Trade, VolumeProfileLevel,
@@ -76,10 +78,14 @@ pub struct ProcessingState {
     last_stats_broadcast: u64,
     // Last confluence time (cooldown)
     last_confluence_time: u64,
+
+    // Supabase persistence (optional)
+    supabase: Option<SupabaseClient>,
+    session_id: Option<Uuid>,
 }
 
 impl ProcessingState {
-    pub fn new() -> Self {
+    pub fn new(supabase: Option<SupabaseClient>, session_id: Option<Uuid>) -> Self {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -111,6 +117,9 @@ impl ProcessingState {
             current_price: 0.0,
             last_stats_broadcast: 0,
             last_confluence_time: 0,
+            // Supabase
+            supabase,
+            session_id,
         }
     }
 
@@ -852,6 +861,25 @@ impl ProcessingState {
         };
         self.signal_history.push(record);
 
+        // Persist to Supabase (fire-and-forget)
+        if let (Some(client), Some(session_id)) = (&self.supabase, self.session_id) {
+            let signal = SignalInsert {
+                session_id,
+                timestamp: now as i64,
+                signal_type: signal_type.to_string(),
+                direction: direction.to_string(),
+                price,
+                price_after_1m: None,
+                price_after_5m: None,
+                outcome: None,
+                metadata: None,
+            };
+            let client = client.clone();
+            tokio::spawn(async move {
+                client.insert_signal(signal).await;
+            });
+        }
+
         // Detect confluence (multiple signals within 5 seconds)
         self.detect_confluence(tx, now, price);
 
@@ -1104,6 +1132,6 @@ impl ProcessingState {
 
 impl Default for ProcessingState {
     fn default() -> Self {
-        Self::new()
+        Self::new(None, None)
     }
 }
