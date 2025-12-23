@@ -330,6 +330,10 @@ pub struct SignalQuery {
     pub signal_type: Option<String>,
     pub direction: Option<String>,
     pub outcome: Option<String>,
+    /// Start date filter (ISO 8601 format)
+    pub start_date: Option<String>,
+    /// End date filter (ISO 8601 format)
+    pub end_date: Option<String>,
 }
 
 impl SupabaseClient {
@@ -348,6 +352,12 @@ impl SupabaseClient {
         }
         if let Some(ref outcome) = query.outcome {
             url.push_str(&format!("&outcome=eq.{}", outcome));
+        }
+        if let Some(ref start_date) = query.start_date {
+            url.push_str(&format!("&created_at=gte.{}", start_date));
+        }
+        if let Some(ref end_date) = query.end_date {
+            url.push_str(&format!("&created_at=lte.{}", end_date));
         }
 
         let response = self
@@ -471,6 +481,12 @@ impl SupabaseClient {
         }
         if let Some(ref outcome) = query.outcome {
             url.push_str(&format!("&outcome=eq.{}", outcome));
+        }
+        if let Some(ref start_date) = query.start_date {
+            url.push_str(&format!("&created_at=gte.{}", start_date));
+        }
+        if let Some(ref end_date) = query.end_date {
+            url.push_str(&format!("&created_at=lte.{}", end_date));
         }
 
         let response = self

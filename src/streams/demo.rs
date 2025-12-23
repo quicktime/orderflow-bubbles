@@ -18,10 +18,11 @@ pub async fn run_demo_stream(
         symbols: symbols.clone(),
     });
 
-    // Create processing state with Supabase persistence
+    // Create processing state with Supabase persistence and AppState for stats sync
     let processing_state = Arc::new(RwLock::new(ProcessingState::new(
         state.supabase.clone(),
         state.session_id,
+        Some(state.clone()),
     )));
 
     // Spawn 1-second aggregation task

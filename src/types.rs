@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use tokio::sync::{broadcast, RwLock};
 use uuid::Uuid;
 
-use crate::supabase::SupabaseClient;
+use crate::supabase::{SupabaseClient, UserConfig};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Trade {
@@ -219,4 +219,8 @@ pub struct AppState {
     pub min_size: RwLock<u32>,
     pub session_id: Option<Uuid>,
     pub supabase: Option<SupabaseClient>,
+    /// User configuration (persisted to Supabase)
+    pub config: RwLock<UserConfig>,
+    /// Session stats: (high, low, volume) - updated by ProcessingState
+    pub session_stats: RwLock<(f64, f64, u64)>,
 }

@@ -2644,3 +2644,177 @@ body {
     grid-template-columns: 1fr;
   }
 }
+
+/* ============================================
+   LIVE STATS BANNER
+   ============================================ */
+
+.live-stats-banner {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 12px 20px;
+  background: linear-gradient(135deg, var(--bg-tertiary) 0%, rgba(0, 230, 118, 0.05) 100%);
+  border: 1px solid var(--accent-green);
+  border-radius: var(--radius-lg);
+  margin-bottom: 20px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  animation: livePulse 2s ease-in-out infinite;
+}
+
+@keyframes livePulse {
+  0%, 100% { border-color: var(--accent-green); }
+  50% { border-color: rgba(0, 230, 118, 0.5); }
+}
+
+.live-stats-banner .live-indicator {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: var(--accent-green);
+  color: var(--bg-primary);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  border-radius: var(--radius-sm);
+  animation: liveGlow 1s ease-in-out infinite alternate;
+}
+
+@keyframes liveGlow {
+  0% { box-shadow: 0 0 4px var(--accent-green); }
+  100% { box-shadow: 0 0 12px var(--accent-green); }
+}
+
+.live-stats-banner span {
+  color: var(--text-secondary);
+}
+
+.live-stats-banner span:not(.live-indicator) {
+  display: flex;
+  gap: 6px;
+}
+
+/* ============================================
+   EXPORT BUTTONS
+   ============================================ */
+
+.export-btn {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  padding: 8px 16px;
+  border-radius: var(--radius-md);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.export-btn:hover {
+  background: var(--bg-elevated);
+  border-color: var(--accent-blue);
+  color: var(--accent-blue);
+}
+
+/* ============================================
+   DATE INPUTS
+   ============================================ */
+
+.date-input {
+  padding: 8px 12px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-primary);
+  cursor: pointer;
+  min-width: 140px;
+}
+
+.date-input:focus {
+  outline: none;
+  border-color: var(--accent-blue);
+}
+
+.date-input::-webkit-calendar-picker-indicator {
+  filter: invert(1);
+  cursor: pointer;
+}
+
+/* Responsive adjustments for new elements */
+@media (max-width: 768px) {
+  .live-stats-banner {
+    flex-wrap: wrap;
+    gap: 12px;
+    padding: 10px 14px;
+    font-size: 11px;
+  }
+
+  .live-stats-banner .live-indicator {
+    font-size: 9px;
+    padding: 3px 8px;
+  }
+
+  .stats-page-actions {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .export-btn {
+    padding: 6px 12px;
+    font-size: 11px;
+  }
+
+  .filters {
+    flex-wrap: wrap;
+  }
+
+  .date-input {
+    min-width: 120px;
+    font-size: 11px;
+  }
+}
+
+/* ============================================
+   WIN RATE CHARTS
+   ============================================ */
+
+.stats-charts {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  margin-bottom: 24px;
+}
+
+.stats-charts h3 {
+  font-family: var(--font-sans);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0 0 16px 0;
+}
+
+.win-rate-canvas {
+  width: 100%;
+  height: 280px;
+  display: block;
+}
+
+@media (max-width: 768px) {
+  .stats-charts {
+    padding: 16px;
+  }
+
+  .stats-charts h3 {
+    font-size: 14px;
+  }
+
+  .win-rate-canvas {
+    height: 220px;
+  }
+}

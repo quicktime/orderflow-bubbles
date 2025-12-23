@@ -1,4 +1,6 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
+import { RustWebSocket, WsMessage } from './websocket';
+import { StatsCharts } from './StatsCharts';
 
 interface Signal {
   id: string;
@@ -41,6 +43,14 @@ interface Session {
   total_volume: number | null;
 }
 
+interface LiveSessionStats {
+  sessionStart: number;
+  currentPrice: number;
+  sessionHigh: number;
+  sessionLow: number;
+  totalVolume: number;
+}
+
 interface StatsPageProps {
   onClose: () => void;
 }
@@ -57,6 +67,36 @@ export function StatsPage({ onClose }: StatsPageProps) {
   const [signalTypeFilter, setSignalTypeFilter] = useState<string>('');
   const [directionFilter, setDirectionFilter] = useState<string>('');
   const [outcomeFilter, setOutcomeFilter] = useState<string>('');
+  const [startDate, setStartDate] = useState<string>('');
+  const [endDate, setEndDate] = useState<string>('');
+
+  // Live session stats from WebSocket
+  const [liveStats, setLiveStats] = useState<LiveSessionStats | null>(null);
+  const wsRef = useRef<RustWebSocket | null>(null);
+
+  // WebSocket connection for live stats
+  useEffect(() => {
+    const ws = new RustWebSocket();
+    wsRef.current = ws;
+
+    ws.onMessage((message: WsMessage) => {
+      if (message.type === 'SessionStats') {
+        setLiveStats({
+          sessionStart: message.sessionStart,
+          currentPrice: message.currentPrice,
+          sessionHigh: message.sessionHigh,
+          sessionLow: message.sessionLow,
+          totalVolume: message.totalVolume,
+        });
+      }
+    });
+
+    ws.connect().catch(console.error);
+
+    return () => {
+      ws.disconnect();
+    };
+  }, []);
 
   const fetchData = useCallback(async () => {
     try {
@@ -69,6 +109,8 @@ export function StatsPage({ onClose }: StatsPageProps) {
       if (signalTypeFilter) params.append('signal_type', signalTypeFilter);
       if (directionFilter) params.append('direction', directionFilter);
       if (outcomeFilter) params.append('outcome', outcomeFilter);
+      if (startDate) params.append('start_date', new Date(startDate).toISOString());
+      if (endDate) params.append('end_date', new Date(endDate).toISOString());
 
       const [signalsRes, statsRes, sessionsRes] = await Promise.all([
         fetch(`/api/signals?${params.toString()}`),
@@ -92,7 +134,7 @@ export function StatsPage({ onClose }: StatsPageProps) {
     } finally {
       setLoading(false);
     }
-  }, [signalTypeFilter, directionFilter, outcomeFilter]);
+  }, [signalTypeFilter, directionFilter, outcomeFilter, startDate, endDate]);
 
   useEffect(() => {
     fetchData();
@@ -100,6 +142,18 @@ export function StatsPage({ onClose }: StatsPageProps) {
     const interval = setInterval(fetchData, 30000);
     return () => clearInterval(interval);
   }, [fetchData]);
+
+  const handleExport = (format: 'csv' | 'json') => {
+    const params = new URLSearchParams();
+    params.append('format', format);
+    if (signalTypeFilter) params.append('signal_type', signalTypeFilter);
+    if (directionFilter) params.append('direction', directionFilter);
+    if (outcomeFilter) params.append('outcome', outcomeFilter);
+    if (startDate) params.append('start_date', new Date(startDate).toISOString());
+    if (endDate) params.append('end_date', new Date(endDate).toISOString());
+
+    window.open(`/api/signals/export?${params.toString()}`, '_blank');
+  };
 
   const formatTime = (timestamp: number) => {
     return new Date(timestamp).toLocaleString();
@@ -123,6 +177,12 @@ export function StatsPage({ onClose }: StatsPageProps) {
       <div className="stats-page-header">
         <h1>Historical Statistics</h1>
         <div className="stats-page-actions">
+          <button className="export-btn" onClick={() => handleExport('csv')}>
+            Export CSV
+          </button>
+          <button className="export-btn" onClick={() => handleExport('json')}>
+            Export JSON
+          </button>
           <button className="refresh-btn" onClick={fetchData} disabled={loading}>
             {loading ? 'Loading...' : 'Refresh'}
           </button>
@@ -131,6 +191,17 @@ export function StatsPage({ onClose }: StatsPageProps) {
           </button>
         </div>
       </div>
+
+      {/* Live session stats banner */}
+      {liveStats && (
+        <div className="live-stats-banner">
+          <span className="live-indicator">LIVE</span>
+          <span>Price: {liveStats.currentPrice.toFixed(2)}</span>
+          <span>High: {liveStats.sessionHigh.toFixed(2)}</span>
+          <span>Low: {liveStats.sessionLow.toFixed(2)}</span>
+          <span>Volume: {liveStats.totalVolume.toLocaleString()}</span>
+        </div>
+      )}
 
       {error && <div className="stats-error">{error}</div>}
 
@@ -157,6 +228,7 @@ export function StatsPage({ onClose }: StatsPageProps) {
 
       {activeTab === 'overview' && stats && (
         <div className="stats-overview-page">
+          <StatsCharts stats={stats} />
           <div className="stats-summary-cards">
             <div className="summary-card">
               <div className="summary-value">{stats.total_signals}</div>
@@ -238,6 +310,20 @@ export function StatsPage({ onClose }: StatsPageProps) {
               <option value="loss">Loss</option>
               <option value="breakeven">Breakeven</option>
             </select>
+            <input
+              type="date"
+              value={startDate}
+              onChange={(e) => setStartDate(e.target.value)}
+              placeholder="Start Date"
+              className="date-input"
+            />
+            <input
+              type="date"
+              value={endDate}
+              onChange={(e) => setEndDate(e.target.value)}
+              placeholder="End Date"
+              className="date-input"
+            />
           </div>
 
           <div className="signals-table-container">

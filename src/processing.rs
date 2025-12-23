@@ -1,11 +1,12 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 use tokio::sync::broadcast;
 use tracing::info;
 use uuid::Uuid;
 
 use crate::supabase::{SignalInsert, SignalOutcomeUpdate, SupabaseClient};
 use crate::types::{
-    AbsorptionEvent, AbsorptionZone, Bubble, CVDPoint, ConfluenceEvent, DeltaFlip,
+    AbsorptionEvent, AbsorptionZone, AppState, Bubble, CVDPoint, ConfluenceEvent, DeltaFlip,
     SessionStats, SignalRecord, SignalStats, StackedImbalance, Trade, VolumeProfileLevel,
     WsMessage,
 };
@@ -84,10 +85,16 @@ pub struct ProcessingState {
     session_id: Option<Uuid>,
     // Pending outcome updates to batch send to Supabase
     pending_outcome_updates: Vec<SignalOutcomeUpdate>,
+    // Shared app state for session stats sync
+    app_state: Option<Arc<AppState>>,
 }
 
 impl ProcessingState {
-    pub fn new(supabase: Option<SupabaseClient>, session_id: Option<Uuid>) -> Self {
+    pub fn new(
+        supabase: Option<SupabaseClient>,
+        session_id: Option<Uuid>,
+        app_state: Option<Arc<AppState>>,
+    ) -> Self {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -123,6 +130,7 @@ impl ProcessingState {
             supabase,
             session_id,
             pending_outcome_updates: Vec::new(),
+            app_state,
         }
     }
 
@@ -1120,6 +1128,18 @@ impl ProcessingState {
 
     /// Broadcast session stats to clients and flush pending outcome updates
     fn broadcast_stats(&mut self, tx: &broadcast::Sender<WsMessage>, _now: u64) {
+        let high = if self.session_high > 0.0 {
+            self.session_high
+        } else {
+            self.current_price
+        };
+        let low = if self.session_low < f64::MAX {
+            self.session_low
+        } else {
+            self.current_price
+        };
+        let volume = self.total_buy_volume + self.total_sell_volume;
+
         let stats = SessionStats {
             session_start: self.session_start,
             delta_flips: self.calculate_signal_stats("delta_flip"),
@@ -1127,20 +1147,21 @@ impl ProcessingState {
             stacked_imbalances: self.calculate_signal_stats("stacked_imbalance"),
             confluences: self.calculate_signal_stats("confluence"),
             current_price: self.current_price,
-            session_high: if self.session_high > 0.0 {
-                self.session_high
-            } else {
-                self.current_price
-            },
-            session_low: if self.session_low < f64::MAX {
-                self.session_low
-            } else {
-                self.current_price
-            },
-            total_volume: self.total_buy_volume + self.total_sell_volume,
+            session_high: high,
+            session_low: low,
+            total_volume: volume,
         };
 
         let _ = tx.send(WsMessage::SessionStats(stats));
+
+        // Sync session stats to shared AppState for shutdown finalization
+        if let Some(ref app_state) = self.app_state {
+            let app_state = app_state.clone();
+            tokio::spawn(async move {
+                let mut stats = app_state.session_stats.write().await;
+                *stats = (high, low, volume);
+            });
+        }
 
         // Flush pending outcome updates to Supabase
         if let Some(client) = &self.supabase {
@@ -1172,6 +1193,6 @@ impl ProcessingState {
 
 impl Default for ProcessingState {
     fn default() -> Self {
-        Self::new(None, None)
+        Self::new(None, None, None)
     }
 }

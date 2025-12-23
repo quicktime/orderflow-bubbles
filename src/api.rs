@@ -1,6 +1,6 @@
 use axum::{
     extract::{Query, State},
-    http::StatusCode,
+    http::{header, StatusCode},
     response::IntoResponse,
     Json,
 };
@@ -31,6 +31,10 @@ pub struct SignalsQueryParams {
     pub signal_type: Option<String>,
     pub direction: Option<String>,
     pub outcome: Option<String>,
+    /// Start date filter (ISO 8601 format, e.g., "2024-12-20T09:30:00Z")
+    pub start_date: Option<String>,
+    /// End date filter (ISO 8601 format)
+    pub end_date: Option<String>,
 }
 
 /// Query params for sessions endpoint
@@ -57,6 +61,8 @@ pub async fn get_signals(
         signal_type: params.signal_type.clone(),
         direction: params.direction.clone(),
         outcome: params.outcome.clone(),
+        start_date: params.start_date.clone(),
+        end_date: params.end_date.clone(),
     };
 
     // Get signals and count in parallel
@@ -119,4 +125,92 @@ pub async fn get_stats(State(state): State<Arc<AppState>>) -> impl IntoResponse 
             Json(serde_json::json!({"error": e.to_string()})),
         ),
     }
+}
+
+/// Query params for export endpoint
+#[derive(Debug, Deserialize)]
+pub struct ExportQueryParams {
+    pub signal_type: Option<String>,
+    pub direction: Option<String>,
+    pub outcome: Option<String>,
+    pub start_date: Option<String>,
+    pub end_date: Option<String>,
+    /// Export format: "csv" or "json" (default: json)
+    pub format: Option<String>,
+}
+
+/// GET /api/signals/export - Export signals as CSV or JSON
+pub async fn export_signals(
+    State(state): State<Arc<AppState>>,
+    Query(params): Query<ExportQueryParams>,
+) -> impl IntoResponse {
+    let Some(ref supabase) = state.supabase else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            [(header::CONTENT_TYPE, "application/json")],
+            r#"{"error": "Supabase not configured"}"#.to_string(),
+        );
+    };
+
+    let query = SignalQuery {
+        limit: Some(10000), // Export up to 10k signals
+        offset: None,
+        signal_type: params.signal_type.clone(),
+        direction: params.direction.clone(),
+        outcome: params.outcome.clone(),
+        start_date: params.start_date.clone(),
+        end_date: params.end_date.clone(),
+    };
+
+    let signals = match supabase.query_signals(&query).await {
+        Ok(s) => s,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                [(header::CONTENT_TYPE, "application/json")],
+                format!(r#"{{"error": "{}"}}"#, e),
+            );
+        }
+    };
+
+    let format = params.format.as_deref().unwrap_or("json");
+
+    if format == "csv" {
+        let csv = signals_to_csv(&signals);
+        (
+            StatusCode::OK,
+            [(header::CONTENT_TYPE, "text/csv; charset=utf-8")],
+            csv,
+        )
+    } else {
+        let json = serde_json::to_string(&signals).unwrap_or_else(|_| "[]".to_string());
+        (
+            StatusCode::OK,
+            [(header::CONTENT_TYPE, "application/json")],
+            json,
+        )
+    }
+}
+
+/// Convert signals to CSV format
+fn signals_to_csv(signals: &[SignalRow]) -> String {
+    let mut csv = String::from("id,session_id,timestamp,signal_type,direction,price,price_after_1m,price_after_5m,outcome,created_at\n");
+
+    for signal in signals {
+        csv.push_str(&format!(
+            "{},{},{},{},{},{},{},{},{},{}\n",
+            signal.id,
+            signal.session_id.map(|u| u.to_string()).unwrap_or_default(),
+            signal.timestamp,
+            signal.signal_type,
+            signal.direction,
+            signal.price,
+            signal.price_after_1m.map(|p| p.to_string()).unwrap_or_default(),
+            signal.price_after_5m.map(|p| p.to_string()).unwrap_or_default(),
+            signal.outcome.as_deref().unwrap_or(""),
+            signal.created_at,
+        ));
+    }
+
+    csv
 }

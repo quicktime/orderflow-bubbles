@@ -25,7 +25,7 @@ use tower_http::{
 use tracing::{error, info};
 
 use streams::{run_databento_stream, run_demo_stream, run_historical_replay};
-use supabase::{SessionRecord, SupabaseClient};
+use supabase::{SessionRecord, SupabaseClient, UserConfig};
 use types::{AppState, ClientMessage, WsMessage};
 
 #[derive(Parser, Debug)]
@@ -111,9 +111,22 @@ async fn main() -> Result<()> {
         .collect();
 
     // Initialize Supabase client (optional - works without it)
-    let (supabase, session_id) = match SupabaseClient::from_env() {
+    let (supabase, session_id, config) = match SupabaseClient::from_env() {
         Some(client) => {
             info!("📊 Supabase connected - signals will be persisted");
+
+            // Load user config from Supabase
+            let config = match client.get_config().await {
+                Ok(cfg) => {
+                    info!("📊 Config loaded: min_size={}, sound={}", cfg.min_size, cfg.sound_enabled);
+                    cfg
+                }
+                Err(e) => {
+                    info!("📊 Using default config (load failed: {})", e);
+                    UserConfig::default()
+                }
+            };
+
             let session = SessionRecord {
                 id: None,
                 mode: mode.to_lowercase(),
@@ -125,27 +138,36 @@ async fn main() -> Result<()> {
             match client.insert_session(&session).await {
                 Ok(id) => {
                     info!("📊 Session created: {}", id);
-                    (Some(client), Some(id))
+                    (Some(client), Some(id), config)
                 }
                 Err(e) => {
                     error!("Failed to create session in Supabase: {}", e);
-                    (Some(client), None)
+                    (Some(client), None, config)
                 }
             }
         }
         None => {
             info!("📊 Supabase not configured - signals will not be persisted");
             info!("   Set SUPABASE_URL and SUPABASE_ANON_KEY to enable persistence");
-            (None, None)
+            (None, None, UserConfig::default())
         }
+    };
+
+    // Use CLI arg if provided, otherwise use config value
+    let min_size = if args.min_size != 1 {
+        args.min_size // CLI override
+    } else {
+        config.min_size // From Supabase config
     };
 
     let state = Arc::new(AppState {
         tx: tx.clone(),
         active_symbols: RwLock::new(symbols.iter().cloned().collect()),
-        min_size: RwLock::new(args.min_size),
+        min_size: RwLock::new(min_size),
         session_id,
         supabase,
+        config: RwLock::new(config),
+        session_stats: RwLock::new((0.0, f64::MAX, 0)),
     });
 
     // Spawn data streaming task (demo, replay, or live)
@@ -208,6 +230,7 @@ async fn main() -> Result<()> {
     let app = Router::new()
         .route("/ws", get(ws_handler))
         .route("/api/signals", get(api::get_signals))
+        .route("/api/signals/export", get(api::export_signals))
         .route("/api/sessions", get(api::get_sessions))
         .route("/api/stats", get(api::get_stats))
         .nest_service("/", ServeDir::new("dist"))
@@ -269,6 +292,22 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
                             if let Some(size) = client_msg.min_size {
                                 *state_clone.min_size.write().await = size;
                                 info!("Min size filter set to: {}", size);
+
+                                // Persist config change to Supabase
+                                if let Some(ref supabase) = state_clone.supabase {
+                                    let mut config = state_clone.config.write().await;
+                                    config.min_size = size;
+                                    let config_clone = config.clone();
+                                    let supabase_clone = supabase.clone();
+                                    // Fire and forget - don't block on persistence
+                                    tokio::spawn(async move {
+                                        if let Err(e) = supabase_clone.set_config(&config_clone).await {
+                                            error!("Failed to persist config: {}", e);
+                                        } else {
+                                            info!("📊 Config persisted to Supabase");
+                                        }
+                                    });
+                                }
                             }
                         }
                         _ => {}
@@ -295,11 +334,15 @@ async fn shutdown_signal(state: Arc<AppState>) {
 
     info!("🛑 Shutdown signal received, finalizing session...");
 
-    // Finalize session in Supabase
+    // Finalize session in Supabase with actual stats
     if let (Some(ref supabase), Some(session_id)) = (&state.supabase, state.session_id) {
-        // Note: We can't easily access ProcessingState stats here since they're in the stream tasks
-        // For now, just update ended_at timestamp
-        if let Err(e) = supabase.update_session(session_id, 0.0, 0.0, 0).await {
+        let (high, low, volume) = *state.session_stats.read().await;
+        // Normalize low if it was never set (still at f64::MAX)
+        let low = if low == f64::MAX { high } else { low };
+
+        info!("📊 Session stats: high={:.2}, low={:.2}, volume={}", high, low, volume);
+
+        if let Err(e) = supabase.update_session(session_id, high, low, volume).await {
             error!("Failed to finalize session: {}", e);
         } else {
             info!("📊 Session finalized: {}", session_id);
