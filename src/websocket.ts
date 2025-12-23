@@ -71,6 +71,40 @@ export interface StackedImbalance {
   x: number;
 }
 
+export interface ConfluenceEvent {
+  timestamp: number;
+  price: number;
+  direction: 'bullish' | 'bearish';
+  score: number; // 2 = medium, 3 = high, 4+ = very high
+  signals: string[]; // List of contributing signals
+  priceAfter1m: number | null;
+  priceAfter5m: number | null;
+  x: number;
+}
+
+export interface SignalStats {
+  count: number;
+  bullishCount: number;
+  bearishCount: number;
+  wins: number;
+  losses: number;
+  avgMove1m: number;
+  avgMove5m: number;
+  winRate: number;
+}
+
+export interface SessionStats {
+  sessionStart: number;
+  deltaFlips: SignalStats;
+  absorptions: SignalStats;
+  stackedImbalances: SignalStats;
+  confluences: SignalStats;
+  currentPrice: number;
+  sessionHigh: number;
+  sessionLow: number;
+  totalVolume: number;
+}
+
 export type WsMessage =
   | { type: 'Bubble' } & Bubble
   | { type: 'CVDPoint'; timestamp: number; value: number; x: number }
@@ -79,6 +113,8 @@ export type WsMessage =
   | { type: 'AbsorptionZones'; zones: AbsorptionZone[] }
   | { type: 'DeltaFlip' } & DeltaFlip
   | { type: 'StackedImbalance' } & StackedImbalance
+  | { type: 'Confluence' } & ConfluenceEvent
+  | { type: 'SessionStats' } & SessionStats
   | { type: 'Connected'; symbols: string[] }
   | { type: 'Error'; message: string };
 

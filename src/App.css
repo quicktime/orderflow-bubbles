@@ -1858,3 +1858,370 @@ body {
   text-align: center;
   margin-top: 4px;
 }
+
+/* ============================================
+   CONFLUENCE BADGE
+   ============================================ */
+
+.confluence-badge {
+  position: absolute;
+  top: 50%;
+  right: 20px;
+  transform: translateY(-50%);
+  background: linear-gradient(135deg, rgba(255, 215, 0, 0.15) 0%, rgba(255, 193, 7, 0.1) 100%);
+  border: 2px solid rgba(255, 215, 0, 0.6);
+  border-radius: var(--radius-lg);
+  padding: 16px 20px;
+  z-index: 100;
+  animation: confluencePulse 0.5s ease-out;
+  box-shadow: 0 0 30px rgba(255, 215, 0, 0.3), inset 0 0 20px rgba(255, 215, 0, 0.1);
+  backdrop-filter: blur(12px);
+  min-width: 220px;
+}
+
+.confluence-badge.bullish {
+  background: linear-gradient(135deg, rgba(0, 230, 118, 0.2) 0%, rgba(255, 215, 0, 0.15) 100%);
+  border-color: var(--accent-green);
+  box-shadow: 0 0 30px rgba(0, 230, 118, 0.4), inset 0 0 20px rgba(0, 230, 118, 0.1);
+}
+
+.confluence-badge.bearish {
+  background: linear-gradient(135deg, rgba(255, 82, 82, 0.2) 0%, rgba(255, 215, 0, 0.15) 100%);
+  border-color: var(--accent-red);
+  box-shadow: 0 0 30px rgba(255, 82, 82, 0.4), inset 0 0 20px rgba(255, 82, 82, 0.1);
+}
+
+@keyframes confluencePulse {
+  0% {
+    transform: translateY(-50%) scale(0.8);
+    opacity: 0;
+  }
+  50% {
+    transform: translateY(-50%) scale(1.05);
+  }
+  100% {
+    transform: translateY(-50%) scale(1);
+    opacity: 1;
+  }
+}
+
+.confluence-badge .badge-icon {
+  font-size: 28px;
+  text-align: center;
+  margin-bottom: 8px;
+}
+
+.confluence-badge .badge-text {
+  font-family: var(--font-sans);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-align: center;
+  color: #ffd700;
+}
+
+.confluence-badge.bullish .badge-text {
+  color: var(--accent-green);
+}
+
+.confluence-badge.bearish .badge-text {
+  color: var(--accent-red);
+}
+
+.confluence-badge .badge-type {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  text-align: center;
+  color: var(--text-secondary);
+  margin-top: 4px;
+}
+
+.confluence-badge .badge-signals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  justify-content: center;
+  margin: 8px 0;
+}
+
+.confluence-badge .signal-tag {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-secondary);
+  text-transform: uppercase;
+}
+
+.confluence-badge .badge-stats {
+  display: flex;
+  justify-content: space-around;
+  gap: 8px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.confluence-badge .badge-stats .stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.confluence-badge .badge-stats .stat-label {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+}
+
+.confluence-badge .badge-stats .stat-value {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.confluence-badge .badge-subtitle {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-muted);
+  text-align: center;
+  margin-top: 8px;
+}
+
+/* ============================================
+   VIEW TOGGLE BUTTON
+   ============================================ */
+
+.view-toggle-btn {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 8px 12px;
+  font-size: 18px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.view-toggle-btn:hover {
+  background: var(--bg-elevated);
+  border-color: var(--border-focus);
+}
+
+.view-toggle-btn.active {
+  background: var(--accent-blue);
+  border-color: var(--accent-blue);
+}
+
+/* ============================================
+   STATS VIEW
+   ============================================ */
+
+.stats-view {
+  width: 100%;
+  height: 100%;
+  padding: 24px;
+  overflow-y: auto;
+  background: var(--bg-secondary);
+}
+
+.stats-view h2 {
+  font-family: var(--font-sans);
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 24px;
+  text-align: center;
+}
+
+.stats-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.stats-overview {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+}
+
+.overview-card {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.overview-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.overview-value {
+  font-family: var(--font-mono);
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.signal-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
+}
+
+.signal-card {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+}
+
+.signal-card.confluence-card {
+  border-color: rgba(255, 215, 0, 0.3);
+  background: linear-gradient(135deg, var(--bg-tertiary) 0%, rgba(255, 215, 0, 0.05) 100%);
+}
+
+.signal-card h3 {
+  font-family: var(--font-sans);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.signal-counts {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.signal-counts .count {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 500;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+}
+
+.signal-counts .count.total {
+  color: var(--text-secondary);
+}
+
+.signal-counts .count.bullish {
+  color: var(--accent-green);
+  background: var(--accent-green-dim);
+}
+
+.signal-counts .count.bearish {
+  color: var(--accent-red);
+  background: var(--accent-red-dim);
+}
+
+.signal-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.signal-metrics .metric {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.signal-metrics .metric-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-muted);
+  text-transform: uppercase;
+}
+
+.signal-metrics .metric-value {
+  font-family: var(--font-mono);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.signal-metrics .metric-value.positive {
+  color: var(--accent-green);
+}
+
+.signal-metrics .metric-value.negative {
+  color: var(--accent-red);
+}
+
+.win-loss {
+  display: flex;
+  gap: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-color);
+}
+
+.win-loss .wins {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--accent-green);
+}
+
+.win-loss .losses {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--accent-red);
+}
+
+.stats-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 300px;
+  gap: 12px;
+}
+
+.stats-loading p {
+  font-family: var(--font-sans);
+  font-size: 16px;
+  color: var(--text-secondary);
+}
+
+.stats-loading .stats-hint {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* Responsive adjustments */
+@media (max-width: 900px) {
+  .stats-overview {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .signal-stats-grid {
+    grid-template-columns: 1fr;
+  }
+}

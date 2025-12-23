@@ -3,8 +3,9 @@ use tokio::sync::broadcast;
 use tracing::info;
 
 use crate::types::{
-    AbsorptionEvent, AbsorptionZone, Bubble, CVDPoint, DeltaFlip, StackedImbalance, Trade,
-    VolumeProfileLevel, WsMessage,
+    AbsorptionEvent, AbsorptionZone, Bubble, CVDPoint, ConfluenceEvent, DeltaFlip,
+    SessionStats, SignalRecord, SignalStats, StackedImbalance, Trade, VolumeProfileLevel,
+    WsMessage,
 };
 
 /// Volume snapshot for rolling average calculation
@@ -60,10 +61,30 @@ pub struct ProcessingState {
     // Stacked imbalances tracking
     last_stacked_imbalance_time: u64, // Cooldown to prevent spam
     last_stacked_imbalance_side: Option<String>, // Track last emitted to avoid duplicates
+
+    // === CONFLUENCE & STATISTICS ===
+    // Signal history for confluence detection and outcome tracking
+    signal_history: Vec<SignalRecord>,
+    // Recent signals within confluence window (5 seconds)
+    recent_signals: Vec<(u64, String, String, f64)>, // (timestamp, signal_type, direction, price)
+    // Session tracking
+    session_start: u64,
+    session_high: f64,
+    session_low: f64,
+    current_price: f64,
+    // Last stats broadcast time (throttle to every 5 seconds)
+    last_stats_broadcast: u64,
+    // Last confluence time (cooldown)
+    last_confluence_time: u64,
 }
 
 impl ProcessingState {
     pub fn new() -> Self {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+
         Self {
             trade_buffer: Vec::new(),
             bubble_counter: 0,
@@ -81,6 +102,15 @@ impl ProcessingState {
             last_delta_flip_time: 0,
             last_stacked_imbalance_time: 0,
             last_stacked_imbalance_side: None,
+            // Confluence & stats
+            signal_history: Vec::new(),
+            recent_signals: Vec::new(),
+            session_start: now,
+            session_high: 0.0,
+            session_low: f64::MAX,
+            current_price: 0.0,
+            last_stats_broadcast: 0,
+            last_confluence_time: 0,
         }
     }
 
@@ -447,6 +477,9 @@ impl ProcessingState {
                 self.cvd_5s_ago,
                 self.cvd
             );
+
+            // Record for confluence detection and stats
+            self.record_signal(tx, now, "delta_flip", direction, avg_price);
         }
 
         self.prev_cvd_sign = current_cvd_sign;
@@ -575,6 +608,15 @@ impl ProcessingState {
                             },
                             context_str
                         );
+
+                        // Record for confluence detection and stats
+                        // Buying absorbed = bearish (sellers absorbing), Selling absorbed = bullish (buyers absorbing)
+                        let abs_direction = if is_buying_absorbed {
+                            "bearish"
+                        } else {
+                            "bullish"
+                        };
+                        self.record_signal(tx, now, "absorption", abs_direction, avg_price);
                     }
                 }
             }
@@ -762,9 +804,295 @@ impl ProcessingState {
                         price_high,
                         total_imbalance
                     );
+
+                    // Record for confluence detection and stats
+                    let stacked_direction = if side == "buy" { "bullish" } else { "bearish" };
+                    let mid_price = (price_low + price_high) / 2.0;
+                    self.record_signal(tx, now, "stacked_imbalance", stacked_direction, mid_price);
                 }
             }
         }
+    }
+
+    /// Record a signal for confluence detection and stats tracking
+    fn record_signal(
+        &mut self,
+        tx: &broadcast::Sender<WsMessage>,
+        now: u64,
+        signal_type: &str,
+        direction: &str,
+        price: f64,
+    ) {
+        // Update session high/low
+        if price > self.session_high {
+            self.session_high = price;
+        }
+        if price < self.session_low && price > 0.0 {
+            self.session_low = price;
+        }
+        self.current_price = price;
+
+        // Add to recent signals for confluence detection
+        self.recent_signals
+            .push((now, signal_type.to_string(), direction.to_string(), price));
+
+        // Clean old signals (older than 5 seconds)
+        let cutoff = now.saturating_sub(5000);
+        self.recent_signals.retain(|(ts, _, _, _)| *ts >= cutoff);
+
+        // Add to signal history for stats
+        let record = SignalRecord {
+            timestamp: now,
+            price,
+            signal_type: signal_type.to_string(),
+            direction: direction.to_string(),
+            price_after_1m: None,
+            price_after_5m: None,
+            outcome: None,
+        };
+        self.signal_history.push(record);
+
+        // Detect confluence (multiple signals within 5 seconds)
+        self.detect_confluence(tx, now, price);
+
+        // Update outcomes for past signals
+        self.update_signal_outcomes(now, price);
+
+        // Broadcast stats every 5 seconds
+        if now.saturating_sub(self.last_stats_broadcast) >= 5000 {
+            self.broadcast_stats(tx, now);
+            self.last_stats_broadcast = now;
+        }
+    }
+
+    /// Detect confluence - multiple signals aligning within time window
+    fn detect_confluence(&mut self, tx: &broadcast::Sender<WsMessage>, now: u64, price: f64) {
+        // Cooldown of 10 seconds between confluence events
+        if now.saturating_sub(self.last_confluence_time) < 10_000 {
+            return;
+        }
+
+        // Need at least 2 different signal types within 5 seconds
+        if self.recent_signals.len() < 2 {
+            return;
+        }
+
+        // Group signals by type
+        let mut signal_types: HashMap<String, Vec<(u64, String)>> = HashMap::new();
+        for (ts, sig_type, direction, _) in &self.recent_signals {
+            signal_types
+                .entry(sig_type.clone())
+                .or_default()
+                .push((*ts, direction.clone()));
+        }
+
+        // Need at least 2 different signal types
+        if signal_types.len() < 2 {
+            return;
+        }
+
+        // Determine consensus direction
+        let mut bullish_count = 0;
+        let mut bearish_count = 0;
+        let mut signals: Vec<String> = Vec::new();
+
+        for (sig_type, occurrences) in &signal_types {
+            // Take the most recent occurrence of each signal type
+            if let Some((_, direction)) = occurrences.last() {
+                signals.push(sig_type.clone());
+                if direction == "bullish" {
+                    bullish_count += 1;
+                } else {
+                    bearish_count += 1;
+                }
+            }
+        }
+
+        // Need consensus direction (at least 2 agreeing)
+        let direction = if bullish_count >= 2 {
+            "bullish"
+        } else if bearish_count >= 2 {
+            "bearish"
+        } else {
+            return; // No consensus
+        };
+
+        let score = signals.len() as u8;
+
+        // Create confluence event
+        let confluence = ConfluenceEvent {
+            timestamp: now,
+            price,
+            direction: direction.to_string(),
+            score,
+            signals: signals.clone(),
+            price_after_1m: None,
+            price_after_5m: None,
+            x: 0.92,
+        };
+
+        let _ = tx.send(WsMessage::Confluence(confluence));
+        self.last_confluence_time = now;
+
+        // Also record confluence as a signal for stats
+        let record = SignalRecord {
+            timestamp: now,
+            price,
+            signal_type: "confluence".to_string(),
+            direction: direction.to_string(),
+            price_after_1m: None,
+            price_after_5m: None,
+            outcome: None,
+        };
+        self.signal_history.push(record);
+
+        info!(
+            "🎯 CONFLUENCE [{}]: {} signals agree → {} | score={} | signals: {:?}",
+            if score >= 3 { "HIGH" } else { "MEDIUM" },
+            score,
+            direction.to_uppercase(),
+            score,
+            signals
+        );
+
+        // Clear recent signals to avoid re-triggering
+        self.recent_signals.clear();
+    }
+
+    /// Update past signals with price outcomes (1m and 5m after)
+    fn update_signal_outcomes(&mut self, now: u64, current_price: f64) {
+        for record in &mut self.signal_history {
+            // Update 1-minute price if 1 minute has passed
+            if record.price_after_1m.is_none() && now.saturating_sub(record.timestamp) >= 60_000 {
+                record.price_after_1m = Some(current_price);
+            }
+
+            // Update 5-minute price and determine outcome
+            if record.price_after_5m.is_none() && now.saturating_sub(record.timestamp) >= 300_000 {
+                record.price_after_5m = Some(current_price);
+
+                // Determine outcome based on direction
+                let move_amount = current_price - record.price;
+                let min_move = 2.0; // Minimum 2 points for meaningful move
+
+                record.outcome = Some(
+                    if record.direction == "bullish" {
+                        if move_amount >= min_move {
+                            "win"
+                        } else if move_amount <= -min_move {
+                            "loss"
+                        } else {
+                            "breakeven"
+                        }
+                    } else {
+                        // bearish
+                        if move_amount <= -min_move {
+                            "win"
+                        } else if move_amount >= min_move {
+                            "loss"
+                        } else {
+                            "breakeven"
+                        }
+                    }
+                    .to_string(),
+                );
+            }
+        }
+
+        // Cleanup old signals (older than 30 minutes)
+        let cutoff = now.saturating_sub(30 * 60 * 1000);
+        self.signal_history.retain(|r| r.timestamp >= cutoff);
+    }
+
+    /// Calculate stats for a specific signal type
+    fn calculate_signal_stats(&self, signal_type: &str) -> SignalStats {
+        let signals: Vec<_> = self
+            .signal_history
+            .iter()
+            .filter(|r| r.signal_type == signal_type)
+            .collect();
+
+        if signals.is_empty() {
+            return SignalStats::default();
+        }
+
+        let count = signals.len() as u32;
+        let bullish_count = signals.iter().filter(|r| r.direction == "bullish").count() as u32;
+        let bearish_count = count - bullish_count;
+
+        let wins = signals
+            .iter()
+            .filter(|r| r.outcome.as_deref() == Some("win"))
+            .count() as u32;
+        let losses = signals
+            .iter()
+            .filter(|r| r.outcome.as_deref() == Some("loss"))
+            .count() as u32;
+
+        // Calculate average moves
+        let moves_1m: Vec<f64> = signals
+            .iter()
+            .filter_map(|r| r.price_after_1m.map(|p| p - r.price))
+            .collect();
+        let moves_5m: Vec<f64> = signals
+            .iter()
+            .filter_map(|r| r.price_after_5m.map(|p| p - r.price))
+            .collect();
+
+        let avg_move_1m = if moves_1m.is_empty() {
+            0.0
+        } else {
+            moves_1m.iter().sum::<f64>() / moves_1m.len() as f64
+        };
+
+        let avg_move_5m = if moves_5m.is_empty() {
+            0.0
+        } else {
+            moves_5m.iter().sum::<f64>() / moves_5m.len() as f64
+        };
+
+        let completed = wins + losses;
+        let win_rate = if completed > 0 {
+            (wins as f64 / completed as f64) * 100.0
+        } else {
+            0.0
+        };
+
+        SignalStats {
+            count,
+            bullish_count,
+            bearish_count,
+            wins,
+            losses,
+            avg_move_1m,
+            avg_move_5m,
+            win_rate,
+        }
+    }
+
+    /// Broadcast session stats to clients
+    fn broadcast_stats(&self, tx: &broadcast::Sender<WsMessage>, _now: u64) {
+        let stats = SessionStats {
+            session_start: self.session_start,
+            delta_flips: self.calculate_signal_stats("delta_flip"),
+            absorptions: self.calculate_signal_stats("absorption"),
+            stacked_imbalances: self.calculate_signal_stats("stacked_imbalance"),
+            confluences: self.calculate_signal_stats("confluence"),
+            current_price: self.current_price,
+            session_high: if self.session_high > 0.0 {
+                self.session_high
+            } else {
+                self.current_price
+            },
+            session_low: if self.session_low < f64::MAX {
+                self.session_low
+            } else {
+                self.current_price
+            },
+            total_volume: self.total_buy_volume + self.total_sell_volume,
+        };
+
+        let _ = tx.send(WsMessage::SessionStats(stats));
     }
 
     /// Send the current volume profile to clients

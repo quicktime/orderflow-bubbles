@@ -69,6 +69,38 @@ interface StackedImbalance {
   x: number;
 }
 
+interface ConfluenceEvent {
+  timestamp: number;
+  price: number;
+  direction: 'bullish' | 'bearish';
+  score: number;
+  signals: string[];
+  x: number;
+}
+
+interface SignalStats {
+  count: number;
+  bullishCount: number;
+  bearishCount: number;
+  wins: number;
+  losses: number;
+  avgMove1m: number;
+  avgMove5m: number;
+  winRate: number;
+}
+
+interface SessionStats {
+  sessionStart: number;
+  deltaFlips: SignalStats;
+  absorptions: SignalStats;
+  stackedImbalances: SignalStats;
+  confluences: SignalStats;
+  currentPrice: number;
+  sessionHigh: number;
+  sessionLow: number;
+  totalVolume: number;
+}
+
 const BUBBLE_LIFETIME_SECONDS = 120;
 
 // Audio alert function for zero crosses
@@ -152,6 +184,31 @@ function playAbsorptionSound(type: 'buying' | 'selling') {
   }
 }
 
+// Audio alert for confluence - distinctive chord
+function playConfluenceSound(direction: 'bullish' | 'bearish') {
+  try {
+    const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const baseFreq = direction === 'bullish' ? 400 : 300;
+    const freqs = [baseFreq, baseFreq * 1.25, baseFreq * 1.5]; // Major chord
+
+    freqs.forEach((freq, i) => {
+      const osc = audioContext.createOscillator();
+      const gain = audioContext.createGain();
+      osc.connect(gain);
+      gain.connect(audioContext.destination);
+      osc.frequency.value = freq;
+      osc.type = 'sine';
+      const delay = i * 0.05;
+      gain.gain.setValueAtTime(0.15, audioContext.currentTime + delay);
+      gain.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + delay + 0.4);
+      osc.start(audioContext.currentTime + delay);
+      osc.stop(audioContext.currentTime + delay + 0.4);
+    });
+  } catch (e) {
+    console.log('Audio not supported', e);
+  }
+}
+
 function App() {
   const [isConnected, setIsConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -176,6 +233,10 @@ function App() {
   const [showAbsorptionBadge, setShowAbsorptionBadge] = useState<AbsorptionAlert | null>(null);
   const [stackedImbalances, setStackedImbalances] = useState<StackedImbalance[]>([]);
   const [showStackedBadge, setShowStackedBadge] = useState<StackedImbalance | null>(null);
+  const [_confluenceEvents, setConfluenceEvents] = useState<ConfluenceEvent[]>([]); // eslint-disable-line @typescript-eslint/no-unused-vars
+  const [showConfluenceBadge, setShowConfluenceBadge] = useState<ConfluenceEvent | null>(null);
+  const [sessionStats, setSessionStats] = useState<SessionStats | null>(null);
+  const [currentView, setCurrentView] = useState<'chart' | 'stats'>('chart');
 
   const wsRef = useRef<RustWebSocket | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -390,6 +451,45 @@ function App() {
           }
           break;
 
+        case 'Confluence':
+          console.log(
+            `🎯 CONFLUENCE [${message.score >= 3 ? 'HIGH' : 'MEDIUM'}]: ${message.signals.join(' + ')} → ${message.direction.toUpperCase()}`
+          );
+
+          const confluence: ConfluenceEvent = {
+            timestamp: message.timestamp,
+            price: message.price,
+            direction: message.direction,
+            score: message.score,
+            signals: message.signals,
+            x: message.x,
+          };
+
+          setConfluenceEvents((prev) => [...prev, confluence]);
+
+          // Always show confluence badge - it's a high-value signal
+          setShowConfluenceBadge(confluence);
+          setTimeout(() => setShowConfluenceBadge(null), 5000);
+
+          if (isSoundEnabled) {
+            playConfluenceSound(message.direction);
+          }
+          break;
+
+        case 'SessionStats':
+          setSessionStats({
+            sessionStart: message.sessionStart,
+            deltaFlips: message.deltaFlips,
+            absorptions: message.absorptions,
+            stackedImbalances: message.stackedImbalances,
+            confluences: message.confluences,
+            currentPrice: message.currentPrice,
+            sessionHigh: message.sessionHigh,
+            sessionLow: message.sessionLow,
+            totalVolume: message.totalVolume,
+          });
+          break;
+
         case 'Connected':
           console.log('📡 Connected to symbols:', message.symbols);
           break;
@@ -585,6 +685,7 @@ function App() {
         setZeroCrosses((prev) => prev.filter((c) => now - c.timestamp < maxAge));
         setAbsorptionAlerts((prev) => prev.filter((a) => now - a.timestamp < maxAge));
         setStackedImbalances((prev) => prev.filter((s) => now - s.timestamp < maxAge));
+        setConfluenceEvents((prev) => prev.filter((c) => now - c.timestamp < maxAge));
       }
 
       setBubbles((prev) =>
@@ -620,6 +721,13 @@ function App() {
         prev.map((stacked) => ({
           ...stacked,
           x: stacked.x - movement,
+        }))
+      );
+
+      setConfluenceEvents((prev) =>
+        prev.map((conf) => ({
+          ...conf,
+          x: conf.x - movement,
         }))
       );
 
@@ -702,6 +810,15 @@ function App() {
           {isConnected && (
             <button className="screenshot-btn" onClick={exportScreenshot} title="Export screenshot (S)">
               📸
+            </button>
+          )}
+          {isConnected && (
+            <button
+              className={`view-toggle-btn ${currentView === 'stats' ? 'active' : ''}`}
+              onClick={() => setCurrentView(currentView === 'chart' ? 'stats' : 'chart')}
+              title={currentView === 'chart' ? 'View Session Stats' : 'Back to Chart'}
+            >
+              {currentView === 'chart' ? '📊' : '📈'}
             </button>
           )}
         </div>
@@ -856,7 +973,40 @@ function App() {
           </div>
         )}
 
-        <BubbleRenderer
+        {/* Confluence Badge */}
+        {showConfluenceBadge && (
+          <div className={`confluence-badge ${showConfluenceBadge.direction}`}>
+            <div className="badge-icon">🎯</div>
+            <div className="badge-text">CONFLUENCE</div>
+            <div className="badge-type">
+              {showConfluenceBadge.score >= 3 ? 'HIGH PROBABILITY' : 'MEDIUM PROBABILITY'} {showConfluenceBadge.direction.toUpperCase()}
+            </div>
+            <div className="badge-signals">
+              {showConfluenceBadge.signals.map((signal, i) => (
+                <span key={i} className="signal-tag">{signal.replace('_', ' ')}</span>
+              ))}
+            </div>
+            <div className="badge-stats">
+              <span className="stat">
+                <span className="stat-label">Score</span>
+                <span className="stat-value">{showConfluenceBadge.score}/4</span>
+              </span>
+              <span className="stat">
+                <span className="stat-label">Price</span>
+                <span className="stat-value">{showConfluenceBadge.price.toFixed(2)}</span>
+              </span>
+            </div>
+            <div className="badge-subtitle">
+              {showConfluenceBadge.direction === 'bullish'
+                ? 'Multiple signals agree - consider LONG entry'
+                : 'Multiple signals agree - consider SHORT entry'}
+            </div>
+          </div>
+        )}
+
+        {currentView === 'chart' ? (
+          <>
+            <BubbleRenderer
           bubbles={bubbles}
           priceRange={priceRange}
           canvasRef={canvasRef}
@@ -903,6 +1053,182 @@ function App() {
               </span>
             </div>
             <div className="tooltip-footer">Click to close</div>
+          </div>
+        )}
+          </>
+        ) : (
+          /* Stats View */
+          <div className="stats-view">
+            <h2>Session Statistics</h2>
+            {sessionStats ? (
+              <div className="stats-grid">
+                <div className="stats-overview">
+                  <div className="overview-card">
+                    <span className="overview-label">Session Start</span>
+                    <span className="overview-value">
+                      {new Date(sessionStats.sessionStart).toLocaleTimeString()}
+                    </span>
+                  </div>
+                  <div className="overview-card">
+                    <span className="overview-label">Current Price</span>
+                    <span className="overview-value">{sessionStats.currentPrice.toFixed(2)}</span>
+                  </div>
+                  <div className="overview-card">
+                    <span className="overview-label">Session Range</span>
+                    <span className="overview-value">
+                      {sessionStats.sessionLow.toFixed(2)} - {sessionStats.sessionHigh.toFixed(2)}
+                    </span>
+                  </div>
+                  <div className="overview-card">
+                    <span className="overview-label">Total Volume</span>
+                    <span className="overview-value">{sessionStats.totalVolume.toLocaleString()}</span>
+                  </div>
+                </div>
+
+                <div className="signal-stats-grid">
+                  {/* Delta Flips */}
+                  <div className="signal-card">
+                    <h3>Delta Flips</h3>
+                    <div className="signal-counts">
+                      <span className="count total">{sessionStats.deltaFlips.count} total</span>
+                      <span className="count bullish">{sessionStats.deltaFlips.bullishCount} bullish</span>
+                      <span className="count bearish">{sessionStats.deltaFlips.bearishCount} bearish</span>
+                    </div>
+                    <div className="signal-metrics">
+                      <div className="metric">
+                        <span className="metric-label">Win Rate</span>
+                        <span className={`metric-value ${sessionStats.deltaFlips.winRate >= 50 ? 'positive' : 'negative'}`}>
+                          {sessionStats.deltaFlips.winRate.toFixed(1)}%
+                        </span>
+                      </div>
+                      <div className="metric">
+                        <span className="metric-label">Avg Move (1m)</span>
+                        <span className={`metric-value ${sessionStats.deltaFlips.avgMove1m >= 0 ? 'positive' : 'negative'}`}>
+                          {sessionStats.deltaFlips.avgMove1m >= 0 ? '+' : ''}{sessionStats.deltaFlips.avgMove1m.toFixed(2)}
+                        </span>
+                      </div>
+                      <div className="metric">
+                        <span className="metric-label">Avg Move (5m)</span>
+                        <span className={`metric-value ${sessionStats.deltaFlips.avgMove5m >= 0 ? 'positive' : 'negative'}`}>
+                          {sessionStats.deltaFlips.avgMove5m >= 0 ? '+' : ''}{sessionStats.deltaFlips.avgMove5m.toFixed(2)}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="win-loss">
+                      <span className="wins">{sessionStats.deltaFlips.wins} W</span>
+                      <span className="losses">{sessionStats.deltaFlips.losses} L</span>
+                    </div>
+                  </div>
+
+                  {/* Absorptions */}
+                  <div className="signal-card">
+                    <h3>Absorptions</h3>
+                    <div className="signal-counts">
+                      <span className="count total">{sessionStats.absorptions.count} total</span>
+                      <span className="count bullish">{sessionStats.absorptions.bullishCount} bullish</span>
+                      <span className="count bearish">{sessionStats.absorptions.bearishCount} bearish</span>
+                    </div>
+                    <div className="signal-metrics">
+                      <div className="metric">
+                        <span className="metric-label">Win Rate</span>
+                        <span className={`metric-value ${sessionStats.absorptions.winRate >= 50 ? 'positive' : 'negative'}`}>
+                          {sessionStats.absorptions.winRate.toFixed(1)}%
+                        </span>
+                      </div>
+                      <div className="metric">
+                        <span className="metric-label">Avg Move (1m)</span>
+                        <span className={`metric-value ${sessionStats.absorptions.avgMove1m >= 0 ? 'positive' : 'negative'}`}>
+                          {sessionStats.absorptions.avgMove1m >= 0 ? '+' : ''}{sessionStats.absorptions.avgMove1m.toFixed(2)}
+                        </span>
+                      </div>
+                      <div className="metric">
+                        <span className="metric-label">Avg Move (5m)</span>
+                        <span className={`metric-value ${sessionStats.absorptions.avgMove5m >= 0 ? 'positive' : 'negative'}`}>
+                          {sessionStats.absorptions.avgMove5m >= 0 ? '+' : ''}{sessionStats.absorptions.avgMove5m.toFixed(2)}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="win-loss">
+                      <span className="wins">{sessionStats.absorptions.wins} W</span>
+                      <span className="losses">{sessionStats.absorptions.losses} L</span>
+                    </div>
+                  </div>
+
+                  {/* Stacked Imbalances */}
+                  <div className="signal-card">
+                    <h3>Stacked Imbalances</h3>
+                    <div className="signal-counts">
+                      <span className="count total">{sessionStats.stackedImbalances.count} total</span>
+                      <span className="count bullish">{sessionStats.stackedImbalances.bullishCount} bullish</span>
+                      <span className="count bearish">{sessionStats.stackedImbalances.bearishCount} bearish</span>
+                    </div>
+                    <div className="signal-metrics">
+                      <div className="metric">
+                        <span className="metric-label">Win Rate</span>
+                        <span className={`metric-value ${sessionStats.stackedImbalances.winRate >= 50 ? 'positive' : 'negative'}`}>
+                          {sessionStats.stackedImbalances.winRate.toFixed(1)}%
+                        </span>
+                      </div>
+                      <div className="metric">
+                        <span className="metric-label">Avg Move (1m)</span>
+                        <span className={`metric-value ${sessionStats.stackedImbalances.avgMove1m >= 0 ? 'positive' : 'negative'}`}>
+                          {sessionStats.stackedImbalances.avgMove1m >= 0 ? '+' : ''}{sessionStats.stackedImbalances.avgMove1m.toFixed(2)}
+                        </span>
+                      </div>
+                      <div className="metric">
+                        <span className="metric-label">Avg Move (5m)</span>
+                        <span className={`metric-value ${sessionStats.stackedImbalances.avgMove5m >= 0 ? 'positive' : 'negative'}`}>
+                          {sessionStats.stackedImbalances.avgMove5m >= 0 ? '+' : ''}{sessionStats.stackedImbalances.avgMove5m.toFixed(2)}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="win-loss">
+                      <span className="wins">{sessionStats.stackedImbalances.wins} W</span>
+                      <span className="losses">{sessionStats.stackedImbalances.losses} L</span>
+                    </div>
+                  </div>
+
+                  {/* Confluences */}
+                  <div className="signal-card confluence-card">
+                    <h3>Confluences</h3>
+                    <div className="signal-counts">
+                      <span className="count total">{sessionStats.confluences.count} total</span>
+                      <span className="count bullish">{sessionStats.confluences.bullishCount} bullish</span>
+                      <span className="count bearish">{sessionStats.confluences.bearishCount} bearish</span>
+                    </div>
+                    <div className="signal-metrics">
+                      <div className="metric">
+                        <span className="metric-label">Win Rate</span>
+                        <span className={`metric-value ${sessionStats.confluences.winRate >= 50 ? 'positive' : 'negative'}`}>
+                          {sessionStats.confluences.winRate.toFixed(1)}%
+                        </span>
+                      </div>
+                      <div className="metric">
+                        <span className="metric-label">Avg Move (1m)</span>
+                        <span className={`metric-value ${sessionStats.confluences.avgMove1m >= 0 ? 'positive' : 'negative'}`}>
+                          {sessionStats.confluences.avgMove1m >= 0 ? '+' : ''}{sessionStats.confluences.avgMove1m.toFixed(2)}
+                        </span>
+                      </div>
+                      <div className="metric">
+                        <span className="metric-label">Avg Move (5m)</span>
+                        <span className={`metric-value ${sessionStats.confluences.avgMove5m >= 0 ? 'positive' : 'negative'}`}>
+                          {sessionStats.confluences.avgMove5m >= 0 ? '+' : ''}{sessionStats.confluences.avgMove5m.toFixed(2)}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="win-loss">
+                      <span className="wins">{sessionStats.confluences.wins} W</span>
+                      <span className="losses">{sessionStats.confluences.losses} L</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="stats-loading">
+                <p>Waiting for session data...</p>
+                <p className="stats-hint">Statistics will appear after signals are detected</p>
+              </div>
+            )}
           </div>
         )}
       </div>

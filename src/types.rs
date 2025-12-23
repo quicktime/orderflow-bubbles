@@ -118,6 +118,74 @@ pub struct StackedImbalance {
     pub x: f64,
 }
 
+/// Confluence Event - Multiple signals aligning for high-probability setup
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConfluenceEvent {
+    pub timestamp: u64,
+    pub price: f64,
+    pub direction: String, // "bullish" or "bearish"
+    pub score: u8,         // 2 = medium, 3 = high, 4+ = very high
+    pub signals: Vec<String>, // List of contributing signals
+    #[serde(rename = "priceAfter1m")]
+    pub price_after_1m: Option<f64>, // Filled in later for stats
+    #[serde(rename = "priceAfter5m")]
+    pub price_after_5m: Option<f64>,
+    pub x: f64,
+}
+
+/// Signal record for tracking outcomes
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SignalRecord {
+    pub timestamp: u64,
+    pub price: f64,
+    pub signal_type: String, // "delta_flip", "absorption", "stacked_imbalance", "confluence"
+    pub direction: String,   // "bullish" or "bearish"
+    #[serde(rename = "priceAfter1m")]
+    pub price_after_1m: Option<f64>,
+    #[serde(rename = "priceAfter5m")]
+    pub price_after_5m: Option<f64>,
+    pub outcome: Option<String>, // "win", "loss", "breakeven" - filled after 5m
+}
+
+/// Session Statistics - aggregated stats for all signals
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionStats {
+    #[serde(rename = "sessionStart")]
+    pub session_start: u64,
+    #[serde(rename = "deltaFlips")]
+    pub delta_flips: SignalStats,
+    pub absorptions: SignalStats,
+    #[serde(rename = "stackedImbalances")]
+    pub stacked_imbalances: SignalStats,
+    pub confluences: SignalStats,
+    #[serde(rename = "currentPrice")]
+    pub current_price: f64,
+    #[serde(rename = "sessionHigh")]
+    pub session_high: f64,
+    #[serde(rename = "sessionLow")]
+    pub session_low: f64,
+    #[serde(rename = "totalVolume")]
+    pub total_volume: u64,
+}
+
+/// Stats for a specific signal type
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SignalStats {
+    pub count: u32,
+    #[serde(rename = "bullishCount")]
+    pub bullish_count: u32,
+    #[serde(rename = "bearishCount")]
+    pub bearish_count: u32,
+    pub wins: u32,
+    pub losses: u32,
+    #[serde(rename = "avgMove1m")]
+    pub avg_move_1m: f64, // Average price move after 1 minute
+    #[serde(rename = "avgMove5m")]
+    pub avg_move_5m: f64, // Average price move after 5 minutes
+    #[serde(rename = "winRate")]
+    pub win_rate: f64, // Percentage of signals that resulted in expected direction
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum WsMessage {
@@ -128,6 +196,8 @@ pub enum WsMessage {
     AbsorptionZones { zones: Vec<AbsorptionZone> },
     DeltaFlip(DeltaFlip),
     StackedImbalance(StackedImbalance),
+    Confluence(ConfluenceEvent),
+    SessionStats(SessionStats),
     Connected { symbols: Vec<String> },
     Error { message: String },
 }
