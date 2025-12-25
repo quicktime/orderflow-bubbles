@@ -1,0 +1,31 @@
+# Dependencies
+node_modules/
+target/
+
+# Build outputs
+dist/
+
+# Local data
+data/
+output/
+*.parquet
+
+# Environment
+.env
+.env.*
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db

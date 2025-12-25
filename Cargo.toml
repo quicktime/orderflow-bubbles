@@ -4,29 +4,47 @@ version = "0.1.0"
 edition = "2021"
 description = "Real-time orderflow aggression bubble visualization for NQ/ES futures"
 
+[lib]
+name = "orderflow_bubbles"
+path = "src/lib.rs"
+
+[[bin]]
+name = "orderflow-bubbles"
+path = "src/main.rs"
+
+[[bin]]
+name = "pipeline"
+path = "src/pipeline/main.rs"
+
 [dependencies]
 # Async runtime
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1.48", features = ["full"] }
 
 # Databento client
-databento = "0.15"
+databento = "0.38"
 
 # Web server + WebSocket
-axum = { version = "0.7", features = ["ws"] }
-tower-http = { version = "0.5", features = ["fs", "cors"] }
+axum = { version = "0.8.8", features = ["ws"] }
+tower-http = { version = "0.6.8", features = ["fs", "cors"] }
 
 # Serialization
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.147"
 
 # Utilities
-futures = "0.3"
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-anyhow = "1"
-clap = { version = "4", features = ["derive", "env"] }
-dotenvy = "0.15"
-time = { version = "0.3", features = ["macros", "parsing", "formatting"] }
-uuid = { version = "1", features = ["v4", "serde"] }
+futures = "0.3.31"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
+anyhow = "1.0.100"
+clap = { version = "4.5.53", features = ["derive", "env"] }
+dotenvy = "0.15.7"
+time = { version = "0.3.44", features = ["macros", "parsing", "formatting"] }
+uuid = { version = "1.19", features = ["v4", "serde"] }
 reqwest = { version = "0.12", features = ["json"] }
-chrono = { version = "0.4", features = ["serde"] }
+chrono = { version = "0.4.42", features = ["serde"] }
+
+# Pipeline dependencies
+zstd = "0.13.3"
+csv = "1.4.0"
+parquet = { version = "57.1", features = ["async"] }
+arrow = { version = "57.1", features = ["chrono-tz"] }

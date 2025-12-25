@@ -8,6 +8,11 @@ dist/
 build/
 target/
 
+# Pipeline data
+output/
+data/
+*.parquet
+
 # Environment variables
 .env
 .env.local

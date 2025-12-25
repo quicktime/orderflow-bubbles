@@ -57,7 +57,7 @@ interface StackedImbalance {
 interface BubbleRendererProps {
   bubbles: Bubble[];
   priceRange: { min: number; max: number } | null;
-  canvasRef: RefObject<HTMLCanvasElement>;
+  canvasRef: RefObject<HTMLCanvasElement | null>;
   cvdHistory: CVDPoint[];
   cvdRange: { min: number; max: number };
   currentCVD: number;

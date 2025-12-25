@@ -36,7 +36,7 @@ pub async fn run_databento_stream(
         .build();
 
     client
-        .subscribe(&subscription)
+        .subscribe(subscription)
         .await
         .context("Failed to subscribe")?;
 

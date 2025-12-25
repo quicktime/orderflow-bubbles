@@ -1,9 +1,3 @@
-mod api;
-mod processing;
-mod streams;
-mod supabase;
-mod types;
-
 use anyhow::Result;
 use axum::{
     extract::{
@@ -24,14 +18,15 @@ use tower_http::{
 };
 use tracing::{error, info};
 
-use streams::{run_databento_stream, run_demo_stream, run_historical_replay};
+use orderflow_bubbles::{api, streams, supabase, types};
+use streams::{run_databento_stream, run_db_replay, run_demo_stream, run_historical_replay, run_local_replay};
 use supabase::{SessionRecord, SupabaseClient, UserConfig};
 use types::{AppState, ClientMessage, WsMessage};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about)]
 struct Args {
-    /// Databento API key (not required for demo mode)
+    /// Databento API key (not required for demo/local-replay mode)
     #[arg(short, long, env = "DATABENTO_API_KEY")]
     api_key: Option<String>,
 
@@ -39,19 +34,31 @@ struct Args {
     #[arg(short, long, default_value = "false")]
     demo: bool,
 
-    /// Run in replay mode with historical data
+    /// Run in replay mode using Databento API (requires API key)
     #[arg(short, long, default_value = "false")]
     replay: bool,
+
+    /// Run replay from Supabase database (data uploaded by pipeline)
+    #[arg(long, default_value = "false")]
+    db_replay: bool,
+
+    /// Run in local replay mode using downloaded .zst files (no API key needed)
+    #[arg(long, default_value = "false")]
+    local_replay: bool,
+
+    /// Data directory for local replay (contains .zst files)
+    #[arg(long, default_value = "data/NQ_11_23_2025-12_23_2025")]
+    data_dir: std::path::PathBuf,
 
     /// Replay date (YYYY-MM-DD format, e.g., 2024-12-20)
     #[arg(long)]
     replay_date: Option<String>,
 
-    /// Replay start time (HH:MM format in ET, e.g., 09:30)
+    /// Replay start time (HH:MM format in ET, e.g., 09:30) - for API replay only
     #[arg(long, default_value = "09:30")]
     replay_start: String,
 
-    /// Replay end time (HH:MM format in ET, e.g., 16:00)
+    /// Replay end time (HH:MM format in ET, e.g., 16:00) - for API replay only
     #[arg(long, default_value = "16:00")]
     replay_end: String,
 
@@ -59,7 +66,7 @@ struct Args {
     #[arg(long, default_value = "1")]
     replay_speed: u32,
 
-    /// Symbols to subscribe to (comma-separated)
+    /// Symbols to subscribe to (comma-separated) - for live/demo mode
     #[arg(short = 's', long, default_value = "NQ.c.0,ES.c.0")]
     symbols: String,
 
@@ -88,8 +95,12 @@ async fn main() -> Result<()> {
 
     let args = Args::parse();
 
-    let mode = if args.replay {
-        "REPLAY"
+    let mode = if args.db_replay {
+        "DB_REPLAY"
+    } else if args.local_replay {
+        "LOCAL_REPLAY"
+    } else if args.replay {
+        "API_REPLAY"
     } else if args.demo {
         "DEMO"
     } else {
@@ -97,7 +108,13 @@ async fn main() -> Result<()> {
     };
     info!("Starting Orderflow Bubbles server");
     info!("Mode: {}", mode);
-    info!("Symbols: {}", args.symbols);
+    if args.db_replay {
+        info!("Replaying from Supabase database");
+    } else if args.local_replay {
+        info!("Data dir: {:?}", args.data_dir);
+    } else {
+        info!("Symbols: {}", args.symbols);
+    }
     info!("Port: {}", args.port);
     info!("Min size filter: {}", args.min_size);
 
@@ -160,7 +177,7 @@ async fn main() -> Result<()> {
         config.min_size // From Supabase config
     };
 
-    let replay_date_clone = if args.replay {
+    let replay_date_clone = if args.replay || args.local_replay || args.db_replay {
         args.replay_date.clone()
     } else {
         None
@@ -186,11 +203,57 @@ async fn main() -> Result<()> {
     // Spawn data streaming task (demo, replay, or live)
     let state_clone = state.clone();
 
-    if args.replay {
+    if args.db_replay {
+        let replay_date = args.replay_date.clone();
+        let replay_speed = args.replay_speed;
+
+        info!("🗄️ Starting DATABASE REPLAY mode");
+        info!("   Source: Supabase (replay_bars_1s table)");
+        if let Some(ref date) = replay_date {
+            info!("   Date filter: {}", date);
+        }
+        info!("   Speed: {}x", replay_speed);
+
+        tokio::spawn(async move {
+            if let Err(e) = run_db_replay(
+                replay_date,
+                replay_speed,
+                state_clone,
+            )
+            .await
+            {
+                error!("Database replay error: {}", e);
+            }
+        });
+    } else if args.local_replay {
+        let data_dir = args.data_dir.clone();
+        let replay_date = args.replay_date.clone();
+        let replay_speed = args.replay_speed;
+
+        info!("📂 Starting LOCAL REPLAY mode");
+        info!("   Data dir: {:?}", data_dir);
+        if let Some(ref date) = replay_date {
+            info!("   Date filter: {}", date);
+        }
+        info!("   Speed: {}x", replay_speed);
+
+        tokio::spawn(async move {
+            if let Err(e) = run_local_replay(
+                data_dir,
+                replay_date,
+                replay_speed,
+                state_clone,
+            )
+            .await
+            {
+                error!("Local replay error: {}", e);
+            }
+        });
+    } else if args.replay {
         let api_key = args
             .api_key
             .clone()
-            .expect("API key required for replay mode");
+            .expect("API key required for API replay mode");
         let replay_date = args
             .replay_date
             .clone()
@@ -199,7 +262,7 @@ async fn main() -> Result<()> {
         let replay_end = args.replay_end.clone();
         let replay_speed = args.replay_speed;
 
-        info!("⏪ Starting REPLAY mode");
+        info!("⏪ Starting API REPLAY mode (Databento)");
         info!("   Date: {}", replay_date);
         info!("   Time: {} - {} ET", replay_start, replay_end);
         info!("   Speed: {}x", replay_speed);
@@ -230,7 +293,7 @@ async fn main() -> Result<()> {
         let api_key = args
             .api_key
             .clone()
-            .expect("API key required for live mode (use --demo for demo mode)");
+            .expect("API key required for live mode (use --demo or --local-replay)");
         info!("📡 Starting LIVE mode with Databento");
         tokio::spawn(async move {
             if let Err(e) = run_databento_stream(api_key, symbols, state_clone).await {
@@ -239,9 +302,15 @@ async fn main() -> Result<()> {
         });
     }
 
+    // Health check endpoint for Railway/Docker
+    async fn health_check() -> &'static str {
+        "OK"
+    }
+
     // Build router with API endpoints
     let app = Router::new()
         .route("/ws", get(ws_handler))
+        .route("/api/health", get(health_check))
         .route("/api/signals", get(api::get_signals))
         .route("/api/signals/export", get(api::export_signals))
         .route("/api/sessions", get(api::get_sessions))
@@ -250,7 +319,8 @@ async fn main() -> Result<()> {
         .layer(CorsLayer::new().allow_origin(Any))
         .with_state(state.clone());
 
-    let addr = SocketAddr::from(([127, 0, 0, 1], args.port));
+    // Use 0.0.0.0 for Docker/Railway compatibility
+    let addr = SocketAddr::from(([0, 0, 0, 0], args.port));
     info!("Server running at http://{}", addr);
     info!("WebSocket endpoint: ws://localhost:{}/ws", args.port);
     info!("API endpoints: /api/signals, /api/sessions, /api/stats");
@@ -283,7 +353,7 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
         mode: state.mode.clone(),
     };
     if let Ok(json) = serde_json::to_string(&welcome) {
-        let _ = sender.send(Message::Text(json)).await;
+        let _ = sender.send(Message::Text(json.into())).await;
     }
 
     // Send initial replay status
@@ -298,7 +368,7 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
             current_time: replay_ctrl.current_timestamp,
         };
         if let Ok(json) = serde_json::to_string(&WsMessage::ReplayStatus(status)) {
-            let _ = sender.send(Message::Text(json)).await;
+            let _ = sender.send(Message::Text(json.into())).await;
         }
     }
 
@@ -306,7 +376,7 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
     let send_task = tokio::spawn(async move {
         while let Ok(msg) = rx.recv().await {
             if let Ok(json) = serde_json::to_string(&msg) {
-                if sender.send(Message::Text(json)).await.is_err() {
+                if sender.send(Message::Text(json.into())).await.is_err() {
                     break;
                 }
             }

@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use databento::{
-    dbn::{Dataset, SType, Schema, TradeMsg},
+    dbn::{decode::DbnMetadata, Dataset, SType, Schema, TradeMsg},
     historical::timeseries::GetRangeParams,
     HistoricalClient,
 };
@@ -157,7 +157,7 @@ pub async fn run_historical_replay(
         // Get symbol name
         let symbol = symbol_map
             .get(trade_msg.hd.instrument_id)
-            .map(|s| s.to_string())
+            .cloned()
             .unwrap_or_else(|| format!("ID:{}", trade_msg.hd.instrument_id));
 
         // Determine side from trade action (action is i8, convert to u8 for char)
