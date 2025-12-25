@@ -141,8 +141,15 @@ export class RustWebSocket {
   private onDisconnectCallback: (() => void) | null = null;
   private onReconnectingCallback: ((attempt: number, delay: number) => void) | null = null;
 
-  constructor(url: string = 'ws://localhost:8080/ws') {
-    this.url = url;
+  constructor(url?: string) {
+    if (url) {
+      this.url = url;
+    } else {
+      // Auto-detect WebSocket URL based on current location
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const host = window.location.host;
+      this.url = `${protocol}//${host}/ws`;
+    }
   }
 
   connect(): Promise<void> {
