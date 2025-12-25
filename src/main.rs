@@ -71,7 +71,7 @@ struct Args {
     symbols: String,
 
     /// Port to run the web server on
-    #[arg(short, long, default_value = "8080")]
+    #[arg(short, long, default_value = "8080", env = "PORT")]
     port: u16,
 
     /// Minimum trade size to process
